@@ -444,7 +444,7 @@ export function buildDockerSpawnArgs(params: DockerSpawnArgsParams): string[] {
           "-e",
           `HOST_GID=${gid}`,
         ]
-      : ["--user", `${uid}:${gid}`]),
+      : ["--user", "node"]),
     "-e",
     "HOME=/home/node",
     // Wiki-history hook (#763 PR 2) runs inside this container after
