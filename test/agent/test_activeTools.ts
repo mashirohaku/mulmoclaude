@@ -1,10 +1,10 @@
 // Unit tests for `getActiveToolDescriptors` — the single source of
 // truth that drives `getActivePlugins(role)` (config.ts) and
-// `buildPluginPromptSections(role)` (prompt.ts). Verifies the two
-// invariants that broke during runtime-plugin rollout:
-//
-//   1. Static GUI / MCP tools are gated by role.availablePlugins.
-//   2. Runtime plugins (#1043 C-2) are auto-included regardless.
+// `buildPluginPromptSections(role)` (prompt.ts). Verifies the
+// invariant: every tool source — static GUI, static MCP, AND runtime —
+// is gated by `role.availablePlugins`. Runtime plugins used to be
+// auto-included regardless of role; that surfaced as a real bug
+// (`manageRecipes` leaking into every role) and was reverted.
 //
 // Plus collision behaviour and the precomputed full-name field that
 // the prompt's MCP-prefix hint depends on.
@@ -67,19 +67,32 @@ describe("getActiveToolDescriptors — single source of truth", () => {
     );
   });
 
-  it("auto-includes runtime plugins regardless of role.availablePlugins", () => {
+  it("includes a runtime plugin when role.availablePlugins lists its toolName", () => {
     registerRuntimePlugins(new Set(), [fakeRuntimePlugin("@x/weather", "fetchWeather")]);
-    const role = fakeRole([]); // empty role — no static plugins allowed
+    const role = fakeRole(["fetchWeather"]);
     const descriptors = getActiveToolDescriptors(role);
     const weather = descriptors.find((descriptor) => descriptor.name === "fetchWeather");
-    assert.ok(weather, "runtime plugins should be active even when the role doesn't list them");
+    assert.ok(weather, "runtime plugins listed in availablePlugins must surface");
     assert.equal(weather?.source, "runtime");
     assert.ok(weather?.endpoint?.includes("/api/plugins/runtime/"), "runtime plugins use the generic dispatch route");
   });
 
+  it("EXCLUDES a runtime plugin when role.availablePlugins doesn't list its toolName", () => {
+    // Regression: `manageRecipes` was previously auto-included for
+    // every role even though only `cookingCoach` should expose it.
+    registerRuntimePlugins(new Set(), [fakeRuntimePlugin("@x/weather", "fetchWeather")]);
+    const role = fakeRole([]); // empty — runtime tools must be gated like static ones
+    const descriptors = getActiveToolDescriptors(role);
+    assert.equal(
+      descriptors.find((descriptor) => descriptor.name === "fetchWeather"),
+      undefined,
+      "runtime plugin must NOT surface when the role doesn't list it",
+    );
+  });
+
   it("precomputes the fully-qualified mcp__<server>__<name> id", () => {
     registerRuntimePlugins(new Set(), [fakeRuntimePlugin("@x/weather", "fetchWeather")]);
-    const role = fakeRole([]);
+    const role = fakeRole(["fetchWeather"]);
     const descriptors = getActiveToolDescriptors(role);
     const weather = descriptors.find((descriptor) => descriptor.name === "fetchWeather");
     assert.equal(weather?.fullName, `mcp__${MCP_SERVER_ID}__fetchWeather`);
@@ -93,7 +106,7 @@ describe("getActiveToolDescriptors — single source of truth", () => {
     // exercise both shapes in one descriptor list.
     _resetRuntimeRegistryForTest();
     registerRuntimePlugins(new Set(), [fakeRuntimePlugin("@x/with-prompt", "withPrompt", "Use this for X."), fakeRuntimePlugin("@x/no-prompt", "noPrompt")]);
-    const role = fakeRole([]);
+    const role = fakeRole(["withPrompt", "noPrompt"]);
     const descriptors = getActiveToolDescriptors(role);
     assert.equal(descriptors.find((descriptor) => descriptor.name === "withPrompt")?.prompt, "Use this for X.");
     assert.equal(descriptors.find((descriptor) => descriptor.name === "noPrompt")?.prompt, undefined);
@@ -122,7 +135,9 @@ describe("getActiveToolDescriptors — single source of truth", () => {
 
   it("returned list is the union with no duplicates across all sources", () => {
     registerRuntimePlugins(new Set(), [fakeRuntimePlugin("@x/r1", "r1Tool"), fakeRuntimePlugin("@x/r2", "r2Tool")]);
-    const role = fakeRole(["presentMulmoScript", "presentForm"]);
+    // Now that runtime plugins are gated, the role must list each
+    // tool name explicitly to surface it.
+    const role = fakeRole(["presentMulmoScript", "presentForm", "r1Tool", "r2Tool"]);
     const descriptors = getActiveToolDescriptors(role);
     const names = descriptors.map((descriptor) => descriptor.name);
     assert.equal(new Set(names).size, names.length, "no duplicate tool names");

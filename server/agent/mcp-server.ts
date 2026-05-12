@@ -162,12 +162,15 @@ const runtimeReady: Promise<void> = (async () => {
       const endpoint = API_ROUTES.plugins.runtimeDispatch.replace(":pkg", encodeURIComponent(plugin.name));
       ALL_TOOLS[plugin.definition.name] = fromPackage(plugin.definition, endpoint);
     }
-    // Runtime plugins are auto-included regardless of role.availablePlugins
-    // — the user explicitly installed them, so every role gets to use them.
-    // Roles still gate the static set via PLUGIN_NAMES env (set by the
-    // parent based on getActivePlugins(role)).
-    const runtimeToolNames = getRuntimePlugins().map((plugin) => plugin.definition.name);
-    activeNames = Array.from(new Set([...PLUGIN_NAMES, ...runtimeToolNames]));
+    // Runtime plugins are gated by `role.availablePlugins` (mirrored
+    // here through the PLUGIN_NAMES env set by the parent's
+    // `getActivePlugins(role)`). Previously every runtime plugin was
+    // auto-active in every role, which leaked preset plugins like
+    // `manageRecipes` into roles that shouldn't expose them. The
+    // intersection is now: ALL_TOOLS includes both static + runtime
+    // entries, but only the names PLUGIN_NAMES authorises become live
+    // tools.
+    activeNames = [...PLUGIN_NAMES];
     tools = activeNames.map((name) => ALL_TOOLS[name]).filter(Boolean);
   } catch (err) {
     process.stderr.write(`[mcp-server] runtime plugin load failed; static tools only: ${String(err)}\n`);

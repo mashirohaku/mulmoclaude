@@ -6,6 +6,7 @@ import { refreshCredentials } from "../system/credentials.js";
 import { loadMcpConfig, loadSettings } from "../system/config.js";
 import type { Role } from "../../src/config/roles.js";
 import { buildSystemPrompt } from "./prompt.js";
+import { loadMemorySnapshot } from "../workspace/memory/snapshot.js";
 import { CONTAINER_WORKSPACE_PATH, buildMcpConfig, getActivePlugins, prepareUserServers, resolveMcpConfigPaths, userServerAllowedToolNames } from "./config.js";
 import { validateStdioPackages } from "./mcpHealth.js";
 import type { Attachment } from "@mulmobridge/protocol";
@@ -65,11 +66,15 @@ export async function* runAgent({
     await refreshCredentials();
   }
 
+  // Pre-load memory once (atomic vs topic format chosen inside
+  // `loadMemorySnapshot`) so prompt assembly itself stays sync.
+  const memorySnapshot = await loadMemorySnapshot(workspacePath);
   const fullSystemPrompt = buildSystemPrompt({
     role,
     workspacePath: useDocker ? CONTAINER_WORKSPACE_PATH : workspacePath,
     useDocker,
     userTimezone,
+    memorySnapshot,
   });
 
   // --debug: dump the full system prompt on the first message of each session.

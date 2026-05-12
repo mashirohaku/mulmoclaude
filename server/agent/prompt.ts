@@ -1,10 +1,8 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { loadAllMemoryEntriesSync } from "../workspace/memory/io.js";
 import type { MemoryEntry } from "../workspace/memory/types.js";
-import { hasTopicFormat } from "../workspace/memory/topic-detect.js";
-import { loadAllTopicFilesSync } from "../workspace/memory/topic-io.js";
 import type { TopicMemoryFile } from "../workspace/memory/topic-types.js";
+import type { MemorySnapshot } from "../workspace/memory/snapshot.js";
 import type { Role } from "../../src/config/roles.js";
 import { getActiveToolDescriptors, MCP_SERVER_ID } from "./activeTools.js";
 import { WORKSPACE_DIRS, WORKSPACE_FILES } from "../workspace/paths.js";
@@ -154,24 +152,24 @@ export function prependJournalPointer(message: string, workspacePath: string): s
 // `readTypedMemoryEntries` / `readLegacyMemoryFile` /
 // `formatMemoryEntryForPrompt` go with them. See
 // `server/index.ts` for the full cleanup sweep.
-export function buildMemoryContext(workspacePath: string): string {
+export function buildMemoryContext(snapshot: MemorySnapshot, workspacePath: string): string {
   const parts: string[] = [];
 
-  if (hasTopicFormat(workspacePath)) {
+  if (snapshot.format === "topic") {
     // Post-swap (topic format active): each topic file lands in the
     // prompt as a single block — header + section index + body.
     // The atomic / legacy readers are intentionally skipped here:
     // once the topic layout is in place the user has acknowledged
     // the cluster and the atomic entries have been parked under
     // `.atomic-backup/`.
-    const topic = readTopicMemoryEntries(workspacePath);
+    const topic = formatTopicFiles(snapshot.files);
     if (topic) parts.push(topic);
   } else {
     // Pre-swap: union of typed atomic entries (#1029) and the
     // legacy `memory.md` (#1029 PR-A). Same dual-mode behaviour
     // PR-B of #1029 shipped — preserved unchanged here so users
     // without topic format keep seeing their memory.
-    const atomic = readTypedMemoryEntries(workspacePath);
+    const atomic = formatTypedMemoryEntries(snapshot.entries);
     if (atomic) parts.push(atomic);
     const legacy = readLegacyMemoryFile(workspacePath);
     if (legacy) parts.push(legacy);
@@ -283,15 +281,20 @@ Keep entries short — name + description + a few lines of body at most. Bias to
 // the workspace uses the topic layout (post-#1070 swap), emits the
 // topic-format rules (find-or-create `<type>/<topic>.md`, append
 // bullets under H2). Otherwise emits the atomic-format rules from
-// #1029 PR-B (one fact per `<type>_<slug>.md`). The same disk
-// signal that drives `buildMemoryContext` decides which one to
-// emit, so write rules and read context are always consistent.
-export function buildMemoryManagementSection(workspacePath: string): string {
-  return hasTopicFormat(workspacePath) ? TOPIC_MEMORY_MANAGEMENT : ATOMIC_MEMORY_MANAGEMENT;
+// #1029 PR-B (one fact per `<type>_<slug>.md`). Both this section
+// and `buildMemoryContext` derive format from the same `snapshot`
+// so write rules and read context stay consistent — including in
+// Docker runs where `workspacePath="/workspace"` doesn't match the
+// host path the snapshot was loaded from (Codex review on #1280).
+export function buildMemoryManagementSection(snapshot: MemorySnapshot): string {
+  return snapshot.format === "topic" ? TOPIC_MEMORY_MANAGEMENT : ATOMIC_MEMORY_MANAGEMENT;
 }
 
-function readTopicMemoryEntries(workspacePath: string): string | null {
-  const files = loadAllTopicFilesSync(workspacePath);
+// Pure formatters — I/O happens once via `loadMemorySnapshot` before
+// `buildSystemPrompt` is called (see `server/agent/index.ts`). Keeps
+// prompt assembly side-effect-free per section.
+
+function formatTopicFiles(files: readonly TopicMemoryFile[]): string | null {
   if (files.length === 0) return null;
   return files.map(formatTopicFileForPrompt).join("\n\n---\n\n");
 }
@@ -303,13 +306,7 @@ function formatTopicFileForPrompt(file: TopicMemoryFile): string {
   return body ? `${tagLine}\n${body}` : tagLine;
 }
 
-function readTypedMemoryEntries(workspacePath: string): string | null {
-  // Use the validated loader rather than reading raw files directly:
-  // a corrupt frontmatter (mid-edit, malformed YAML) is logged and
-  // skipped by `loadAllMemoryEntriesSync` instead of leaking into the
-  // system prompt. This also keeps the skip rules (MEMORY.md /
-  // dotfiles / non-files) defined in exactly one place.
-  const entries = loadAllMemoryEntriesSync(workspacePath);
+function formatTypedMemoryEntries(entries: readonly MemoryEntry[]): string | null {
   if (entries.length === 0) return null;
   return entries.map(formatMemoryEntryForPrompt).join("\n\n");
 }
@@ -522,6 +519,10 @@ export interface SystemPromptParams {
    *  user every turn. Missing or invalid values fall back to
    *  server-local date only. */
   userTimezone?: string;
+  /** Pre-loaded memory snapshot — caller awaits `loadMemorySnapshot`
+   *  before invoking `buildSystemPrompt` so prompt assembly stays
+   *  synchronous and side-effect-free for the memory section. */
+  memorySnapshot: MemorySnapshot;
 }
 
 // Accept IANA-looking strings only. Anything else (including
@@ -681,15 +682,15 @@ interface NamedSection {
 const SYSTEM_PROMPT_WARN_THRESHOLD_CHARS = 20000;
 
 export function buildSystemPrompt(params: SystemPromptParams): string {
-  const { role, workspacePath, useDocker, userTimezone } = params;
+  const { role, workspacePath, useDocker, userTimezone, memorySnapshot } = params;
 
   const sections: NamedSection[] = [
     { name: "base", content: SYSTEM_PROMPT },
     { name: "role", content: role.prompt },
     { name: "workspace", content: `Workspace directory: ${workspacePath}` },
     { name: "time", content: buildTimeSection(new Date(), userTimezone) },
-    { name: "memory", content: buildMemoryContext(workspacePath) },
-    { name: "memory-management", content: buildMemoryManagementSection(workspacePath) },
+    { name: "memory", content: buildMemoryContext(memorySnapshot, workspacePath) },
+    { name: "memory-management", content: buildMemoryManagementSection(memorySnapshot) },
     { name: "sandbox", content: useDocker ? SANDBOX_TOOLS_HINT : null },
     { name: "wiki", content: buildWikiContext(workspacePath) },
     { name: "sources", content: buildSourcesContext(workspacePath) },

@@ -154,6 +154,14 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true
       },
+      // Static-mount on the backend (server/index.ts: app.use('/artifacts/svg', ...)).
+      // Same reason as `/artifacts/images`: `<img src="/artifacts/svg/...">` would
+      // otherwise hit Vite's SPA catch-all and receive index.html (HTTP 200, HTML
+      // body), which the browser silently fails to render as an image.
+      '/artifacts/svg': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
+      },
       // Static-mount on the backend (server/index.ts: app.use('/artifacts/html', ...)).
       // Without this proxy, Vite's HTML transform injects `/@vite/client` and
       // `/src/main.ts` into the response, which the iframe (opaque origin) then

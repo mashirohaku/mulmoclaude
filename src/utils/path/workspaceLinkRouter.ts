@@ -32,8 +32,13 @@ export function classifyWorkspacePath(href: string): WorkspaceLinkTarget | null 
   const cleaned = stripFragmentAndQuery(href);
   if (cleaned.length === 0) return null;
 
+  // marked.parse() percent-encodes multibyte chars in <a href> output.
+  // Decode once so the downstream router doesn't double-encode (turning
+  // `%E4%BD%9C` into `%25E4%25BD%259C`, breaking the file API lookup).
+  const decoded = safeDecode(cleaned);
+
   // Normalize path (collapse ./ and ../, reject root-escape)
-  const normalized = normalizePath(cleaned);
+  const normalized = normalizePath(decoded);
   if (!normalized) return null;
 
   // Wiki page: data/wiki/pages/<slug>.md
@@ -71,6 +76,17 @@ export function resolveWikiHref(href: string, baseDir: string): string {
     return `${baseDir}/${href}`;
   }
   return href;
+}
+
+// Decode a percent-encoded path once. Falls back to the raw input on
+// malformed sequences (truncated UTF-8, lone `%`) so a bad link still
+// routes — Files view will surface its own 404 if the path is unreachable.
+function safeDecode(str: string): string {
+  try {
+    return decodeURIComponent(str);
+  } catch {
+    return str;
+  }
 }
 
 function stripFragmentAndQuery(str: string): string {

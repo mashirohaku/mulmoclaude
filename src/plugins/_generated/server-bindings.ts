@@ -10,9 +10,11 @@ import chartDef from "../chart/definition";
 import manageSkillsDef from "../manageSkills/definition";
 import manageSourceDef from "../manageSource/definition";
 import markdownDef from "../markdown/definition";
+import photoLocationsDef from "../photoLocations/definition";
 import presentFormDef from "../presentForm/definition";
 import presentHtmlDef from "../presentHtml/definition";
 import presentMulmoScriptDef from "../presentMulmoScript/definition";
+import presentSVGDef from "../presentSVG/definition";
 import schedulerAutomationsDef from "../scheduler/automationsDefinition";
 import schedulerCalendarDef from "../scheduler/calendarDefinition";
 import spreadsheetDef from "../spreadsheet/definition";
@@ -22,9 +24,11 @@ import { META as chartMeta } from "../chart/meta";
 import { META as manageSkillsMeta } from "../manageSkills/meta";
 import { META as manageSourceMeta } from "../manageSource/meta";
 import { META as markdownMeta } from "../markdown/meta";
+import { META as photoLocationsMeta } from "../photoLocations/meta";
 import { META as presentFormMeta } from "../presentForm/meta";
 import { META as presentHtmlMeta } from "../presentHtml/meta";
 import { META as presentMulmoScriptMeta } from "../presentMulmoScript/meta";
+import { META as presentSVGMeta } from "../presentSVG/meta";
 import { META as schedulerCalendarMeta } from "../scheduler/calendarMeta";
 import { META as spreadsheetMeta } from "../spreadsheet/meta";
 
@@ -38,9 +42,11 @@ export const GENERATED_SERVER_BINDINGS: readonly ServerPluginBinding[] = [
   { def: manageSkillsDef, endpoint: mcpEndpoint(manageSkillsMeta) },
   { def: manageSourceDef, endpoint: mcpEndpoint(manageSourceMeta) },
   { def: markdownDef, endpoint: mcpEndpoint(markdownMeta) },
+  { def: photoLocationsDef, endpoint: mcpEndpoint(photoLocationsMeta) },
   { def: presentFormDef, endpoint: mcpEndpoint(presentFormMeta) },
   { def: presentHtmlDef, endpoint: mcpEndpoint(presentHtmlMeta) },
   { def: presentMulmoScriptDef, endpoint: mcpEndpoint(presentMulmoScriptMeta) },
+  { def: presentSVGDef, endpoint: mcpEndpoint(presentSVGMeta) },
   { def: schedulerAutomationsDef, endpoint: mcpEndpoint(schedulerCalendarMeta) },
   { def: schedulerCalendarDef, endpoint: mcpEndpoint(schedulerCalendarMeta) },
   { def: spreadsheetDef, endpoint: mcpEndpoint(spreadsheetMeta) },

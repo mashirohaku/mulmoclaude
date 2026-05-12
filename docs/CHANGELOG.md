@@ -10,6 +10,59 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Se
 
 ---
 
+## [0.6.1] - 2026-05-10
+
+Two-day patch with several visible additions: a **wiki-syntax embed** family (`[[amazon:...]]`, `[[isbn:...]]`, `[[youtube:...]]`) usable across every markdown surface, **photo location capture** that pulls lat/lng from EXIF on every saved/forwarded image, and the **Map plugin** wired up to `@gui-chat-plugin/google-map`. Notifications fired by the `notify` MCP tool inside a chat now carry a click target back to the source session.
+
+### Highlights
+
+#### Wiki-syntax embeds (#1221)
+- Author markdown can now write `[[amazon:B00ICN066A]]`, `[[isbn:9780062316097]]`, or `[[youtube:dQw4w9WgXcQ]]` instead of raw URLs and get a clickable card / link / inline player. The renderer is registry-driven so future prefixes plug in cleanly.
+- **YouTube** plays inline via `youtube-nocookie.com` (no profile cookies until click), wrapped in a 16:9 box. **Amazon** shows the product cover thumbnail and links to the user's locale-appropriate storefront (`amazon.co.jp` for `ja`, `amazon.de` for `de`, …, falls back to `.com`). **ISBN** links to OpenLibrary.
+- External markdown links across wiki / files / chat artifact / sources / skill body now open in a new tab on click instead of being dead-clicks.
+
+#### Photo locations (#1222)
+- Every photo MulmoClaude saves (chat attachments, bridge-forwarded images, file uploads) now has its EXIF parsed: lat/lng + timestamp + camera + lens captured into a sidecar JSON under `data/photo-locations/`. HEIC / HEIF / TIFF supported alongside JPEG.
+- New built-in `managePhotoLocations` plugin lets the agent and user list / search / open photos by date, place, or camera.
+- Photos tab in Settings exposes the auto-capture toggle.
+- LINE bridge now forwards inbound image messages to the agent for the same processing.
+
+#### Map plugin (#1227)
+- Integrated `@gui-chat-plugin/google-map@0.4.0`. Add a Google Maps API key under Settings → Map and the agent can show locations, add markers, find places, and request directions inline in the chat canvas.
+- Available in `general` / `guide` / `debug` roles.
+
+#### Notifications open the source chat (#1262)
+- When the `notify` MCP tool fires from inside a chat session (typically a scheduled background chat reporting completion), the bell entry now carries a navigate target. Clicking opens that chat session instead of just dismissing.
+
+### Added
+- `[[amazon:...]]` / `[[isbn:...]]` / `[[youtube:...]]` wiki-embed renderers + extension registry (#1252 / #1261 / #1265 / #1269).
+- `managePhotoLocations` built-in plugin + Photos settings tab (#1247 / #1250 / #1251).
+- Map plugin wiring + Settings → Map tab + role enablement (#1241 / #1255 / `4c5b3e1`).
+- LINE bridge: inbound photo forwarding (#1264, `b3aab94`).
+- `notify` MCP tool: chat-session linkback via `navigateTarget` (#1262).
+- Plan files for #1221, #1222, #1244, and Encore Phase 2 (DSL + compiler + runtime architecture).
+
+### Changed
+- Runtime plugins relocated from `packages/<name>-plugin/` to `packages/plugins/<name>-plugin/` for a cleaner monorepo layout (#1242). No npm package names change.
+- `marked` config: external links inject `target="_blank" rel="noopener noreferrer"` automatically — wired into all 6 markdown / sheet renderers (#1252).
+- Roles now gate runtime plugins by `availablePlugins` (#1266); previously runtime plugins were universally exposed regardless of role.
+- DOMPurify call sites for skill body / manageSkills / sources description now go through a shared `sanitizeMarkdownHtml` wrapper that selectively allows YouTube embeds while keeping every other iframe stripped.
+
+### Fixed
+- StackView no longer over-grows iframes on remeasure or in stack layout — postMessage height path now caps at the viewport (`a2017c4` / `0ae82df` / `5817790` / `4aa6461`).
+- Map plugin: `googleMapKey` flows through StackView; View force-remounts when the key transitions null → set; key gated to `mapControl` only so other plugins can't read it (`f45067c` / `894ef3c` / `79a7cbf` / `1b04a34`).
+- presentMulmoScript: beat edits now persist across page reload + in-SPA nav (#1074, `adcca77` / `7dc74b0`).
+- Workspace links: percent-encoded image self-repair + multibyte URL routing fixed (#1102, `b8899fb` / `c8b14e0`).
+- Photo EXIF: lat/lng rescue path covers more vendor variants; HEIC/HEIF/TIFF registered for capture (#1222, `8c9aea7`).
+- mulmoclaude launcher deps: `@gui-chat-plugin/google-map` and `exifr` declared so the published tarball boots (`c798a20` / `5e17513`).
+- CI cache path now includes `packages/plugins/*/dist` after the workspace move (`830a5145`).
+
+### Security
+- DOMPurify wrapper enforces a strict allowlist for iframes — only `https://www.youtube-nocookie.com/embed/<11-char-id>` survives the hook; foreign hosts and the cookie-tracking `youtube.com` host are stripped.
+- Map plugin: `googleMapKey` only reaches the `mapControl` plugin; other plugins receive `null` (`1b04a34`).
+
+---
+
 ## [0.6.0] - 2026-05-08
 
 A two-week release. The themes: a usable **Accounting plugin**, the start of the **personal-use plugin sets** (recipe-book, reading-list / articles / quotes, map), a **Memory system** with proactive recall and edit UI, the **Notifier (Encore) prototype**, the **Spotify plugin**, **MulmoScript** quality-of-life polish, and a swarm of dev-experience wins.

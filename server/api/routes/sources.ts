@@ -36,6 +36,7 @@ import { badRequest, conflict, sendError, serverError } from "../../utils/httpEr
 import { errorMessage } from "../../utils/errors.js";
 import { API_ROUTES } from "../../../src/config/apiRoutes.js";
 import { bindRoute } from "../../utils/router.js";
+import { asyncHandler } from "../../utils/asyncHandler.js";
 import { isNonEmptyString, isRecord } from "../../utils/types.js";
 
 const router = Router();
@@ -56,15 +57,14 @@ interface ErrorResponse {
   error: string;
 }
 
-bindRoute(router, API_ROUTES.sources.list, async (_req: Request, res: Response<ListSourcesResponse | ErrorResponse>) => {
-  try {
+bindRoute(
+  router,
+  API_ROUTES.sources.list,
+  asyncHandler<Request, Response<ListSourcesResponse | ErrorResponse>>("sources", "failed to list sources", async (_req, res) => {
     const sources = await listSources(workspacePath);
     res.json({ sources });
-  } catch (err) {
-    log.warn("sources", "list failed", { error: String(err) });
-    serverError(res, errorMessage(err, "unknown error"));
-  }
-});
+  }),
+);
 
 // --- POST /api/sources --------------------------------------------------
 
@@ -164,13 +164,15 @@ interface RebuildBody {
   scheduleType?: unknown;
 }
 
-bindRoute(router, API_ROUTES.sources.rebuild, async (req: Request<object, unknown, RebuildBody>, res: Response<ErrorResponse | Record<string, unknown>>) => {
-  const scheduleType = validateSchedule(req.body?.scheduleType, "daily");
-  if (!scheduleType) {
-    badRequest(res, `scheduleType must be one of: ${[...SOURCE_SCHEDULES].join(", ")}`);
-    return;
-  }
-  try {
+bindRoute(
+  router,
+  API_ROUTES.sources.rebuild,
+  asyncHandler<Request<object, unknown, RebuildBody>, Response<ErrorResponse | Record<string, unknown>>>("sources", "rebuild failed", async (req, res) => {
+    const scheduleType = validateSchedule(req.body?.scheduleType, "daily");
+    if (!scheduleType) {
+      badRequest(res, `scheduleType must be one of: ${[...SOURCE_SCHEDULES].join(", ")}`);
+      return;
+    }
     log.info("sources", "manual rebuild triggered", { scheduleType });
     const result = await runSourcesPipeline({
       workspaceRoot: workspacePath,
@@ -196,11 +198,8 @@ bindRoute(router, API_ROUTES.sources.rebuild, async (req: Request<object, unknow
       archiveErrors: result.archiveErrors,
       isoDate: result.isoDate,
     });
-  } catch (err) {
-    log.warn("sources", "rebuild failed", { error: String(err) });
-    serverError(res, errorMessage(err, "rebuild failed"));
-  }
-});
+  }),
+);
 
 // --- POST /api/sources/manage -------------------------------------------
 //
@@ -244,31 +243,34 @@ interface ManageSourceSuccess {
 
 const MANAGE_ACTIONS = new Set(["list", "register", "remove", "rebuild"]);
 
-bindRoute(router, API_ROUTES.sources.manage, async (req: Request<object, unknown, ManageSourceBody>, res: Response<ManageSourceSuccess | ErrorResponse>) => {
-  const action = req.body?.action;
-  if (typeof action !== "string" || !MANAGE_ACTIONS.has(action)) {
-    badRequest(res, `action must be one of: ${[...MANAGE_ACTIONS].join(", ")}`);
-    return;
-  }
-  try {
-    switch (action) {
-      case "list":
-        await respondWithList(res, "Loaded source registry.");
+bindRoute(
+  router,
+  API_ROUTES.sources.manage,
+  asyncHandler<Request<object, unknown, ManageSourceBody>, Response<ManageSourceSuccess | ErrorResponse>>(
+    "sources",
+    "manageSource dispatch failed",
+    async (req, res) => {
+      const action = req.body?.action;
+      if (typeof action !== "string" || !MANAGE_ACTIONS.has(action)) {
+        badRequest(res, `action must be one of: ${[...MANAGE_ACTIONS].join(", ")}`);
         return;
-      case "register":
-        await handleRegister(req.body, res);
-        return;
-      case "remove":
-        await handleRemove(req.body, res);
-        return;
-      case "rebuild":
-        await handleRebuild(res);
-    }
-  } catch (err) {
-    log.warn("sources", "manage failed", { action, error: String(err) });
-    serverError(res, errorMessage(err, "manage failed"));
-  }
-});
+      }
+      switch (action) {
+        case "list":
+          await respondWithList(res, "Loaded source registry.");
+          return;
+        case "register":
+          await handleRegister(req.body, res);
+          return;
+        case "remove":
+          await handleRemove(req.body, res);
+          return;
+        case "rebuild":
+          await handleRebuild(res);
+      }
+    },
+  ),
+);
 
 async function respondWithList(res: Response<ManageSourceSuccess | ErrorResponse>, message: string, extra: Partial<ManageSourceData> = {}): Promise<void> {
   const sources = await listSources(workspacePath);

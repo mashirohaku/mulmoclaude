@@ -10,8 +10,8 @@ import { saveUserTasks } from "../../utils/files/user-tasks-io.js";
 import { startChat } from "./agent.js";
 import { log } from "../../system/logger/index.js";
 import { SCHEDULER_ACTIONS, TASK_ACTIONS } from "../../../src/plugins/scheduler/actions.js";
-import { badRequest, notFound, serverError } from "../../utils/httpError.js";
-import { errorMessage } from "../../utils/errors.js";
+import { badRequest, notFound } from "../../utils/httpError.js";
+import { asyncHandler } from "../../utils/asyncHandler.js";
 import { makeUuid } from "../../utils/id.js";
 
 const router = Router();
@@ -47,118 +47,120 @@ interface SchedulerBody extends SchedulerActionInput {
 bindRoute(
   router,
   API_ROUTES.scheduler.dispatch,
-  async (req: Request<object, unknown, SchedulerBody>, res: Response<DispatchSuccessResponse<ScheduledItem> | DispatchErrorResponse | unknown>) => {
-    const { action, ...input } = req.body;
+  asyncHandler<Request<object, unknown, SchedulerBody>, Response<DispatchSuccessResponse<ScheduledItem> | DispatchErrorResponse | unknown>>(
+    "scheduler",
+    "Internal server error",
+    async (req, res) => {
+      const { action, ...input } = req.body;
 
-    // Route task actions to the user-task subsystem
-    if (TASK_ACTIONS.has(action)) {
-      await handleTaskAction(action, input, res);
-      return;
-    }
+      // Route task actions to the user-task subsystem
+      if (TASK_ACTIONS.has(action)) {
+        await handleTaskAction(action, input, res);
+        return;
+      }
 
-    // Calendar item actions (existing behavior)
-    const items = loadItems();
-    const result = dispatchScheduler(action, items, input);
-    respondWithDispatchResult(res, result, {
-      shouldPersist: action !== SCHEDULER_ACTIONS.show,
-      instructions: "Display the updated scheduler to the user.",
-      persist: saveItems,
-    });
-  },
+      // Calendar item actions (existing behavior)
+      const items = loadItems();
+      const result = dispatchScheduler(action, items, input);
+      respondWithDispatchResult(res, result, {
+        shouldPersist: action !== SCHEDULER_ACTIONS.show,
+        instructions: "Display the updated scheduler to the user.",
+        persist: saveItems,
+      });
+    },
+  ),
 );
 
 async function handleTaskAction(action: string, input: Record<string, unknown>, res: Response): Promise<void> {
   log.info("scheduler", "task action: start", { action });
-  try {
-    if (action === SCHEDULER_ACTIONS.listTasks) {
-      const tasks = loadUserTasks();
-      log.info("scheduler", "task action: listTasks ok", { tasks: tasks.length });
-      res.json({
-        uuid: makeUuid(),
-        message: `${tasks.length} scheduled task(s) found.`,
-        data: { tasks },
-      });
-      return;
-    }
-
-    if (action === SCHEDULER_ACTIONS.createTask) {
-      const result = validateAndCreate(input);
-      if (result.kind === "error") {
-        log.warn("scheduler", "task action: createTask validation failed", { error: result.error });
-        badRequest(res, result.error);
-        return;
-      }
-      const tasks = loadUserTasks();
-      tasks.push(result.task);
-      await saveUserTasks(tasks);
-      await refreshUserTasks();
-      log.info("scheduler", "task action: createTask ok", { id: result.task.id, name: result.task.name });
-      res.json({
-        uuid: makeUuid(),
-        message: `Task "${result.task.name}" created and scheduled.`,
-        data: { task: result.task },
-      });
-      return;
-    }
-
-    if (action === SCHEDULER_ACTIONS.deleteTask) {
-      const taskId = typeof input.id === "string" ? input.id : "";
-      const tasks = loadUserTasks();
-      const idx = tasks.findIndex((task) => task.id === taskId);
-      if (idx === -1) {
-        log.warn("scheduler", "task action: deleteTask not found", { taskId });
-        notFound(res, `task not found: ${taskId}`);
-        return;
-      }
-      const { name } = tasks[idx];
-      tasks.splice(idx, 1);
-      await saveUserTasks(tasks);
-      await refreshUserTasks();
-      log.info("scheduler", "task action: deleteTask ok", { taskId, name });
-      res.json({
-        uuid: makeUuid(),
-        message: `Task "${name}" deleted.`,
-        data: { deleted: taskId },
-      });
-      return;
-    }
-
-    if (action === SCHEDULER_ACTIONS.runTask) {
-      const taskId = typeof input.id === "string" ? input.id : "";
-      const tasks = loadUserTasks();
-      const task = tasks.find((candidate) => candidate.id === taskId);
-      if (!task) {
-        notFound(res, `task not found: ${taskId}`);
-        return;
-      }
-      const chatSessionId = makeUuid();
-      log.info("scheduler", "manual run via MCP", {
-        name: task.name,
-        chatSessionId,
-      });
-      startChat({
-        message: task.prompt,
-        roleId: task.roleId,
-        chatSessionId,
-        origin: SESSION_ORIGINS.scheduler,
-      }).catch((err) => {
-        log.error("scheduler", "manual run failed", {
-          error: String(err),
-        });
-      });
-      res.json({
-        uuid: makeUuid(),
-        message: `Task "${task.name}" triggered.`,
-        data: { triggered: taskId, chatSessionId },
-      });
-      return;
-    }
-
-    badRequest(res, `unknown task action: ${action}`);
-  } catch (err) {
-    log.error("scheduler", "task action failed", { error: errorMessage(err) });
-    serverError(res, "Internal server error");
+  // Errors bubble up to the asyncHandler wrapper on the dispatch route,
+  // which logs at `log.error("scheduler", "handler threw", …)` and
+  // returns a generic 500. No inner try/catch needed here.
+  if (action === SCHEDULER_ACTIONS.listTasks) {
+    const tasks = loadUserTasks();
+    log.info("scheduler", "task action: listTasks ok", { tasks: tasks.length });
+    res.json({
+      uuid: makeUuid(),
+      message: `${tasks.length} scheduled task(s) found.`,
+      data: { tasks },
+    });
+    return;
   }
+
+  if (action === SCHEDULER_ACTIONS.createTask) {
+    const result = validateAndCreate(input);
+    if (result.kind === "error") {
+      log.warn("scheduler", "task action: createTask validation failed", { error: result.error });
+      badRequest(res, result.error);
+      return;
+    }
+    const tasks = loadUserTasks();
+    tasks.push(result.task);
+    await saveUserTasks(tasks);
+    await refreshUserTasks();
+    log.info("scheduler", "task action: createTask ok", { id: result.task.id, name: result.task.name });
+    res.json({
+      uuid: makeUuid(),
+      message: `Task "${result.task.name}" created and scheduled.`,
+      data: { task: result.task },
+    });
+    return;
+  }
+
+  if (action === SCHEDULER_ACTIONS.deleteTask) {
+    const taskId = typeof input.id === "string" ? input.id : "";
+    const tasks = loadUserTasks();
+    const idx = tasks.findIndex((task) => task.id === taskId);
+    if (idx === -1) {
+      log.warn("scheduler", "task action: deleteTask not found", { taskId });
+      notFound(res, `task not found: ${taskId}`);
+      return;
+    }
+    const { name } = tasks[idx];
+    tasks.splice(idx, 1);
+    await saveUserTasks(tasks);
+    await refreshUserTasks();
+    log.info("scheduler", "task action: deleteTask ok", { taskId, name });
+    res.json({
+      uuid: makeUuid(),
+      message: `Task "${name}" deleted.`,
+      data: { deleted: taskId },
+    });
+    return;
+  }
+
+  if (action === SCHEDULER_ACTIONS.runTask) {
+    const taskId = typeof input.id === "string" ? input.id : "";
+    const tasks = loadUserTasks();
+    const task = tasks.find((candidate) => candidate.id === taskId);
+    if (!task) {
+      notFound(res, `task not found: ${taskId}`);
+      return;
+    }
+    const chatSessionId = makeUuid();
+    log.info("scheduler", "manual run via MCP", {
+      name: task.name,
+      chatSessionId,
+    });
+    startChat({
+      message: task.prompt,
+      roleId: task.roleId,
+      chatSessionId,
+      origin: SESSION_ORIGINS.scheduler,
+    }).catch((err) => {
+      log.error("scheduler", "manual run failed", {
+        error: String(err),
+      });
+    });
+    res.json({
+      uuid: makeUuid(),
+      message: `Task "${task.name}" triggered.`,
+      data: { triggered: taskId, chatSessionId },
+    });
+    return;
+  }
+
+  badRequest(res, `unknown task action: ${action}`);
 }
 
 export default router;

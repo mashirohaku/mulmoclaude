@@ -17,10 +17,9 @@ import { aggregateRecentItems, loadItemBody, type NewsItem } from "../../workspa
 import { loadJsonFile, writeJsonAtomic } from "../../utils/files/json.js";
 import { WORKSPACE_FILES } from "../../../src/config/workspacePaths.js";
 import { API_ROUTES } from "../../../src/config/apiRoutes.js";
-import { badRequest, serverError } from "../../utils/httpError.js";
-import { errorMessage } from "../../utils/errors.js";
+import { badRequest } from "../../utils/httpError.js";
 import { isRecord } from "../../utils/types.js";
-import { log } from "../../system/logger/index.js";
+import { asyncHandler } from "../../utils/asyncHandler.js";
 
 // Window upper bound — keeps memory bounded if a caller passes
 // a comically large `days`. Daily JSON aggregation is O(days * items)
@@ -41,20 +40,18 @@ const router = Router();
 
 // ── /api/news/items ─────────────────────────────────────────────
 
-router.get(API_ROUTES.news.items, async (req: Request, res: Response<{ items: NewsItem[] } | { error: string }>) => {
-  const days = parseDays(req.query.days);
-  if (days === null) {
-    badRequest(res, "invalid `days` query parameter");
-    return;
-  }
-  try {
+router.get(
+  API_ROUTES.news.items,
+  asyncHandler<Request, Response<{ items: NewsItem[] } | { error: string }>>("news", "failed to load news items", async (req, res) => {
+    const days = parseDays(req.query.days);
+    if (days === null) {
+      badRequest(res, "invalid `days` query parameter");
+      return;
+    }
     const items = await aggregateRecentItems(workspacePath, days);
     res.json({ items });
-  } catch (err) {
-    log.error("news", "aggregate failed", { error: errorMessage(err) });
-    serverError(res, "failed to load news items");
-  }
-});
+  }),
+);
 
 function parseDays(raw: unknown): number | null {
   if (raw === undefined) return DEFAULT_DAYS;
@@ -72,13 +69,14 @@ function parseDays(raw: unknown): number | null {
 // params would let an attacker fabricate paths — so we resolve from
 // the trusted in-memory aggregate keyed by `id` here.
 
-router.get(API_ROUTES.news.itemBody, async (req: Request<{ id: string }>, res: Response<{ body: string | null } | { error: string }>) => {
-  const { id } = req.params;
-  if (!id) {
-    badRequest(res, "missing item id");
-    return;
-  }
-  try {
+router.get(
+  API_ROUTES.news.itemBody,
+  asyncHandler<Request<{ id: string }>, Response<{ body: string | null } | { error: string }>>("news", "failed to load item body", async (req, res) => {
+    const { id } = req.params;
+    if (!id) {
+      badRequest(res, "missing item id");
+      return;
+    }
     const items = await aggregateRecentItems(workspacePath, MAX_DAYS);
     const match = items.find((entry) => entry.id === id);
     if (!match) {
@@ -87,46 +85,35 @@ router.get(API_ROUTES.news.itemBody, async (req: Request<{ id: string }>, res: R
     }
     const body = await loadItemBody(workspacePath, match.sourceSlug, match.url, match.publishedAt);
     res.json({ body });
-  } catch (err) {
-    log.error("news", "body lookup failed", { error: errorMessage(err) });
-    serverError(res, "failed to load item body");
-  }
-});
+  }),
+);
 
 // ── /api/news/read-state ─────────────────────────────────────────
 
 const readStateAbsPath = (): string => path.join(workspacePath, WORKSPACE_FILES.newsReadState);
 
-router.get(API_ROUTES.news.readState, (_req: Request, res: Response<ReadState | { error: string }>) => {
-  try {
+router.get(
+  API_ROUTES.news.readState,
+  asyncHandler<Request, Response<ReadState | { error: string }>>("news", "failed to load news read-state", async (_req, res) => {
     const data = loadJsonFile<ReadState>(readStateAbsPath(), { readIds: [] });
     const sanitized = sanitizeReadState(data);
     res.json(sanitized);
-  } catch (err) {
-    log.error("news", "read-state load failed", {
-      error: errorMessage(err),
-    });
-    serverError(res, "failed to load news read-state");
-  }
-});
+  }),
+);
 
-router.put(API_ROUTES.news.readState, async (req: Request, res: Response<ReadState | { error: string }>) => {
-  const { body } = req;
-  if (!isRecord(body) || !Array.isArray(body.readIds)) {
-    badRequest(res, "expected { readIds: string[] }");
-    return;
-  }
-  const sanitized = sanitizeReadState({ readIds: body.readIds });
-  try {
+router.put(
+  API_ROUTES.news.readState,
+  asyncHandler<Request, Response<ReadState | { error: string }>>("news", "failed to save news read-state", async (req, res) => {
+    const { body } = req;
+    if (!isRecord(body) || !Array.isArray(body.readIds)) {
+      badRequest(res, "expected { readIds: string[] }");
+      return;
+    }
+    const sanitized = sanitizeReadState({ readIds: body.readIds });
     await writeJsonAtomic(readStateAbsPath(), sanitized);
     res.json(sanitized);
-  } catch (err) {
-    log.error("news", "read-state save failed", {
-      error: errorMessage(err),
-    });
-    serverError(res, "failed to save news read-state");
-  }
-});
+  }),
+);
 
 // Drop non-string entries, dedupe, cap at MAX_READ_IDS (keeping the
 // most recent — i.e. tail end — of the list). Pure for testability.

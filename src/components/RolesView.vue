@@ -313,16 +313,25 @@ interface PluginEntry {
 
 // Plugins the user can assign — exclude internal/auto-managed ones
 const EXCLUDED = new Set(["text-response"]);
-const guiPlugins: PluginEntry[] = getAllPluginNames()
-  .filter((name) => !EXCLUDED.has(name))
-  .map((name) => ({ name, enabled: true, requiredEnv: [] }));
+// `getAllPluginNames()` reads from the reactive `runtimeRegistry`
+// (src/tools/runtimeLoader.ts). Wrapping in `computed` makes this
+// re-evaluate when `loadRuntimePlugins` populates the registry
+// post-mount — runtime plugins (e.g. server-only `edgar`) only
+// become visible to the role editor through this reactive read.
+const guiPlugins = computed<PluginEntry[]>(() =>
+  getAllPluginNames()
+    .filter((name) => !EXCLUDED.has(name))
+    .map((name) => ({ name, enabled: true, requiredEnv: [] })),
+);
 
-const availablePlugins = ref<PluginEntry[]>(guiPlugins);
+const mcpTools = ref<PluginEntry[]>([]);
+
+const availablePlugins = computed<PluginEntry[]>(() => [...guiPlugins.value, ...mcpTools.value]);
 
 onMounted(async () => {
   const result = await apiGet<PluginEntry[]>(API_ROUTES.mcpTools.list);
   if (result.ok) {
-    availablePlugins.value = [...guiPlugins, ...result.data];
+    mcpTools.value = result.data;
   }
   // Non-critical: MCP tools enrich the plugin palette for role editing
   // but the view works fine with GUI plugins alone. No error banner needed.

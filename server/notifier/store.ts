@@ -3,7 +3,7 @@
 // `WORKSPACE_PATHS`.
 
 import { promises as fsPromises } from "fs";
-import { writeFileAtomic } from "../utils/files/atomic.js";
+import { writeJsonAtomic } from "../utils/files/json.js";
 import type { NotifierFile, NotifierHistoryFile } from "./types.js";
 
 function isNotFoundError(err: unknown): boolean {
@@ -45,7 +45,7 @@ export async function loadActive(filePath: string): Promise<NotifierFile> {
  *  writes (engine.ts queues mutations) — this function makes no
  *  concurrency guarantees of its own. */
 export async function saveActive(filePath: string, state: NotifierFile): Promise<void> {
-  await writeFileAtomic(filePath, JSON.stringify(state, null, 2));
+  await writeJsonAtomic(filePath, state);
 }
 
 /** Read the history file. Empty array on first run. Same parse-error
@@ -66,5 +66,5 @@ export async function loadHistory(filePath: string): Promise<NotifierHistoryFile
 }
 
 export async function saveHistory(filePath: string, state: NotifierHistoryFile): Promise<void> {
-  await writeFileAtomic(filePath, JSON.stringify(state, null, 2));
+  await writeJsonAtomic(filePath, state);
 }

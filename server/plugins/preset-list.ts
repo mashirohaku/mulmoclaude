@@ -39,14 +39,25 @@ export const PRESET_PLUGINS: readonly PresetPlugin[] = [
   // todo-plugin via the workspace symlink at
   // `node_modules/@mulmoclaude/spotify-plugin/`.
   { packageName: "@mulmoclaude/spotify-plugin" },
-  // #1175 / #1169 PR-A — recipe-book runtime plugin. First slice of
-  // the Cooking Coach plugin set. Stores recipes as one markdown file
-  // per recipe under the plugin's `files.data` scope; demonstrates
-  // markdown-per-record storage on the v0.3 runtime API.
-  { packageName: "@mulmoclaude/recipe-book-plugin" },
+  // #1175 / #1286 — `recipe-book-plugin` removed from the preset
+  // list. The plugin source still ships at
+  // `packages/plugins/recipe-book-plugin/` for re-enabling, but
+  // recipe management has moved to the `mc-cooking-coach` preset
+  // skill which drives `data/cooking/recipes/<slug>.md` via
+  // Read/Write/Edit. Removing the entry unmounts the plugin's MCP
+  // tool + Vue View, which the skill replaces with a markdown
+  // README index in the recipes dir.
   // Encore plan PR 1 follow-up — dev-only debug playground plugin.
   // Owns the standalone `/debug` page; the toolbar entry is gated on
   // `VITE_DEV_MODE=1` so production builds hide the launcher button
   // (the page itself is still reachable by typing the URL).
   { packageName: "@mulmoclaude/debug-plugin" },
+  // SEC EDGAR runtime plugin — wraps the public EDGAR API as one
+  // tool with kind-discriminated dispatch. Server-only (no Vue).
+  // Self-healing config flow: when the SEC-required contact info
+  // is missing the dispatch returns a `config_required` payload
+  // that instructs the LLM to ask the user, write the JSON file
+  // at `~/mulmoclaude/config/plugins/<encoded-pkg>/config.json`,
+  // and retry. Opt-in per role like every other runtime plugin.
+  { packageName: "@mulmoclaude/edgar-plugin" },
 ];

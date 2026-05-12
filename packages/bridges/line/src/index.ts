@@ -41,6 +41,33 @@ client.onPush((pushEvent) => {
 
 // ── LINE API helpers ────────────────────────────────────────────
 
+/** Download an image attached to an inbound LINE message. Returns
+ *  the bytes + Content-Type so the caller can build an Attachment
+ *  envelope for the chat-service socket. Returns null when the
+ *  fetch fails (network error, 4xx, …) — caller logs and skips. */
+async function downloadLineImage(messageId: string): Promise<{ bytes: Buffer; mimeType: string } | null> {
+  try {
+    const res = await fetch(`https://api-data.line.me/v2/bot/message/${encodeURIComponent(messageId)}/content`, {
+      headers: { Authorization: `Bearer ${channelAccessToken}` },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) {
+      console.error(`[line] downloadLineImage failed: ${res.status}`);
+      return null;
+    }
+    // LINE returns image/jpeg by default but the Data API also
+    // serves the original sender format (PNG, GIF, …). Trust the
+    // Content-Type header so the photo-EXIF hook (#1222 PR-A) can
+    // tell HEIC apart from JPEG and surface the right sidecar.
+    const mimeType = res.headers.get("content-type")?.split(";")[0].trim() || "image/jpeg";
+    const arrayBuffer = await res.arrayBuffer();
+    return { bytes: Buffer.from(arrayBuffer), mimeType };
+  } catch (err) {
+    console.error(`[line] downloadLineImage network error: ${err}`);
+    return null;
+  }
+}
+
 async function pushMessage(userId: string, text: string): Promise<void> {
   const messages = chunkText(text, 5000).map((messageText) => ({
     type: "text",
@@ -106,13 +133,33 @@ app.post("/webhook", async (req: Request, res: Response) => {
   for (const event of body.events) {
     const incoming = extractIncomingLineMessage(event);
     if (!incoming) continue;
-    const { userId, text } = incoming;
-
-    console.log(`[line] message user=${userId} len=${text.length}`);
 
     try {
-      const ack = await client.send(userId, text);
-      await pushMessage(userId, formatAckReply(ack));
+      if (incoming.kind === "text") {
+        console.log(`[line] message user=${incoming.userId} len=${incoming.text.length}`);
+        const ack = await client.send(incoming.userId, incoming.text);
+        await pushMessage(incoming.userId, formatAckReply(ack));
+        continue;
+      }
+      // kind === "image"
+      console.log(`[line] image user=${incoming.userId} messageId=${incoming.imageMessageId}`);
+      const image = await downloadLineImage(incoming.imageMessageId);
+      if (!image) {
+        await pushMessage(incoming.userId, "Sorry, I couldn't fetch that image.");
+        continue;
+      }
+      // chat-service's `parseMessagePayload` rejects empty `text`
+      // (`text is required`) so attachment-only messages need a
+      // placeholder body. Mirror the Telegram convention (see
+      // `packages/bridges/telegram/src/router.ts`) — an instructive
+      // prompt rather than a caption, so the agent treats the
+      // attachment as the subject and produces a useful response.
+      // The post-save EXIF hook (#1222 PR-A) writes a sidecar if
+      // GPS data is present. (Codex review on PR #1255 / #1263.)
+      const attachments = [{ mimeType: image.mimeType, data: image.bytes.toString("base64") }];
+      const placeholderText = "Describe / analyze this file.";
+      const ack = await client.send(incoming.userId, placeholderText, attachments);
+      await pushMessage(incoming.userId, formatAckReply(ack));
     } catch (err) {
       console.error(`[line] message handling failed: ${err}`);
     }

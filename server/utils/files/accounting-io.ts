@@ -13,7 +13,8 @@ import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 
 import { workspacePath, WORKSPACE_DIRS } from "../../workspace/paths.js";
-import { writeFileAtomic } from "./atomic.js";
+import { writeJsonAtomic } from "./json.js";
+import { isEnoent } from "./safe.js";
 import type { AccountingConfig, Account, JournalEntry, MonthSnapshot } from "../../accounting/types.js";
 
 const root = (workspaceRoot?: string): string => workspaceRoot ?? workspacePath;
@@ -71,14 +72,6 @@ function snapshotFileFor(bookId: string, period: string, workspaceRoot?: string)
   return path.join(snapshotsDir(bookId, workspaceRoot), `${period}.json`);
 }
 
-interface ErrnoLike {
-  code?: string;
-}
-
-function isMissingFile(err: unknown): boolean {
-  return typeof err === "object" && err !== null && (err as ErrnoLike).code === "ENOENT";
-}
-
 async function fileExists(filePath: string): Promise<boolean> {
   try {
     await fsPromises.access(filePath);
@@ -88,12 +81,18 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
-async function readJsonOrNull<T>(filePath: string): Promise<T | null> {
+/** Strict variant of `readJsonOrNull` from `./json.ts`: returns null
+ *  on ENOENT but RETHROWS other read errors and parse failures so a
+ *  corrupted accounting journal surfaces rather than silently
+ *  collapsing to "no data". `./json.ts` keeps the permissive
+ *  variant for user-config files where a single bad keystroke
+ *  shouldn't 500 the server. */
+async function readJsonStrict<T>(filePath: string): Promise<T | null> {
   try {
     const raw = await fsPromises.readFile(filePath, "utf-8");
     return JSON.parse(raw) as T;
   } catch (err) {
-    if (isMissingFile(err)) return null;
+    if (isEnoent(err)) return null;
     throw err;
   }
 }
@@ -101,22 +100,22 @@ async function readJsonOrNull<T>(filePath: string): Promise<T | null> {
 // ── config.json ────────────────────────────────────────────────────
 
 export async function readConfig(workspaceRoot?: string): Promise<AccountingConfig | null> {
-  return readJsonOrNull<AccountingConfig>(configPath(workspaceRoot));
+  return readJsonStrict<AccountingConfig>(configPath(workspaceRoot));
 }
 
 export async function writeConfig(config: AccountingConfig, workspaceRoot?: string): Promise<void> {
-  await writeFileAtomic(configPath(workspaceRoot), JSON.stringify(config, null, 2));
+  await writeJsonAtomic(configPath(workspaceRoot), config);
 }
 
 // ── accounts.json ──────────────────────────────────────────────────
 
 export async function readAccounts(bookId: string, workspaceRoot?: string): Promise<Account[]> {
-  const accounts = await readJsonOrNull<Account[]>(accountsPath(bookId, workspaceRoot));
+  const accounts = await readJsonStrict<Account[]>(accountsPath(bookId, workspaceRoot));
   return accounts ?? [];
 }
 
 export async function writeAccounts(bookId: string, accounts: Account[], workspaceRoot?: string): Promise<void> {
-  await writeFileAtomic(accountsPath(bookId, workspaceRoot), JSON.stringify(accounts, null, 2));
+  await writeJsonAtomic(accountsPath(bookId, workspaceRoot), accounts);
 }
 
 // ── journal/YYYY-MM.jsonl (append-only) ────────────────────────────
@@ -195,7 +194,7 @@ export async function readJournalMonth(bookId: string, period: string, workspace
   try {
     raw = await fsPromises.readFile(file, "utf-8");
   } catch (err) {
-    if (isMissingFile(err)) return { entries: [], skipped: 0 };
+    if (isEnoent(err)) return { entries: [], skipped: 0 };
     throw err;
   }
   const entries: JournalEntry[] = [];
@@ -219,7 +218,7 @@ export async function listJournalPeriods(bookId: string, workspaceRoot?: string)
   try {
     names = await fsPromises.readdir(journalDir(bookId, workspaceRoot));
   } catch (err) {
-    if (isMissingFile(err)) return [];
+    if (isEnoent(err)) return [];
     throw err;
   }
   return names
@@ -231,7 +230,7 @@ export async function listJournalPeriods(bookId: string, workspaceRoot?: string)
 // ── snapshots/YYYY-MM.json (cache, not source of truth) ────────────
 
 export async function readSnapshot(bookId: string, period: string, workspaceRoot?: string): Promise<MonthSnapshot | null> {
-  return readJsonOrNull<MonthSnapshot>(snapshotFileFor(bookId, period, workspaceRoot));
+  return readJsonStrict<MonthSnapshot>(snapshotFileFor(bookId, period, workspaceRoot));
 }
 
 export async function writeSnapshot(bookId: string, snapshot: MonthSnapshot, workspaceRoot?: string): Promise<void> {
@@ -242,7 +241,7 @@ export async function writeSnapshot(bookId: string, snapshot: MonthSnapshot, wor
   // `writeSnapshot` for the same period at once. Distinct tmp file
   // names mean each writer renames its own; the destination
   // overwrites idempotently (both derive from the same journal).
-  await writeFileAtomic(file, JSON.stringify(snapshot, null, 2), { uniqueTmp: true });
+  await writeJsonAtomic(file, snapshot, { uniqueTmp: true });
 }
 
 /** Drop snapshot files for all periods >= `fromPeriod`. The next
@@ -253,7 +252,7 @@ export async function invalidateSnapshotsFrom(bookId: string, fromPeriod: string
   try {
     names = await fsPromises.readdir(snapshotsDir(bookId, workspaceRoot));
   } catch (err) {
-    if (isMissingFile(err)) return { removed: [] };
+    if (isEnoent(err)) return { removed: [] };
     throw err;
   }
   const removed: string[] = [];

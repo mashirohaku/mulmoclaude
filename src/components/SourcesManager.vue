@@ -240,7 +240,7 @@
           {{ briefError }}
         </div>
         <!-- eslint-disable-next-line vue/no-v-html -->
-        <div v-else class="markdown-content" v-html="briefHtml" />
+        <div v-else class="markdown-content" @click="handleExternalLinkClick" v-html="briefHtml" />
       </div>
     </div>
 
@@ -277,11 +277,12 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { marked } from "marked";
-import DOMPurify from "dompurify";
 import type { ManageSourceData, RebuildSummary, Source } from "../plugins/manageSource/index";
 import { apiGet, apiPost, apiDelete } from "../utils/api";
+import { sanitizeMarkdownHtml } from "../utils/markdown/sanitize";
 import { API_ROUTES } from "../config/apiRoutes";
 import { buildRouteUrl } from "../plugins/meta-types";
+import { handleExternalLinkClick } from "../utils/dom/externalLink";
 import { SOURCE_FILTER_KEYS, countByFilter, matchesSourceFilter, type SourceFilterKey } from "../utils/sources/filter";
 import FilterChip from "./FilterChip.vue";
 import PageChatComposer from "./PageChatComposer.vue";
@@ -866,7 +867,7 @@ const briefHtml = computed(() => {
   // content:encoded blocks often carry tracking pixels, iframes,
   // inline <script> from scraped sources). Sanitize before
   // binding to v-html.
-  return DOMPurify.sanitize(marked(body) as string);
+  return sanitizeMarkdownHtml(marked(body) as string);
 });
 
 // Load on mount:

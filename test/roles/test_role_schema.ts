@@ -16,14 +16,18 @@ describe("RoleSchema", () => {
     assert.deepStrictEqual(result, valid);
   });
 
-  it("silently drops unknown plugin names from availablePlugins (lenient parse — #951)", () => {
-    // Pre-#951 the schema rejected the whole role when it
-    // referenced an unknown tool. That cost exceeded the typo-
-    // catching benefit when a tool was removed in a later release
-    // (e.g. `manageRoles` itself in #951): a legitimate role file
-    // would silently disappear from `/roles` because
-    // `loadCustomRoles` swallows zod failures. The schema now
-    // filters the array instead so the role survives the load.
+  it("preserves every non-empty string in availablePlugins (lenient parse — #951 + runtime plugins)", () => {
+    // The schema preserves any non-empty string. Two reasons we no
+    // longer filter to `TOOL_NAMES` membership:
+    //   - User-installed runtime plugins publish their `toolName`
+    //     only at process start; a role file references those names
+    //     statically, but they aren't in compile-time `TOOL_NAMES`.
+    //   - A persisted legacy role may reference a tool that was
+    //     removed in a later release (e.g. `manageRoles` post-#951).
+    //     Keeping the entry preserves user intent visually in
+    //     `/roles` rather than making it disappear; the actual
+    //     gating happens later in `getActiveToolDescriptors` which
+    //     intersects with the live tool registry.
     const input = {
       id: "test",
       name: "Test",
@@ -32,16 +36,17 @@ describe("RoleSchema", () => {
       availablePlugins: ["presentMulmoScript", "presentHTML", "generateImage"],
     };
     const result = RoleSchema.parse(input);
-    assert.deepStrictEqual(result.availablePlugins, ["presentMulmoScript", "generateImage"]);
+    assert.deepStrictEqual(result.availablePlugins, ["presentMulmoScript", "presentHTML", "generateImage"]);
   });
 
-  it("recovers a legacy role file that references the removed `manageRoles` tool (#951 regression guard)", () => {
-    // Before #951 a role with `manageRoles` validated and the
-    // role loaded; after #951 the tool name is gone from
-    // TOOL_NAMES. Without lenient parsing the role would now
-    // disappear from the list. Pin that the lenient parse keeps
-    // it alive (dropping the dead reference but preserving every
-    // other plugin).
+  it("preserves a legacy role file that references the removed `manageRoles` tool", () => {
+    // Before #951 a role with `manageRoles` validated and the role
+    // loaded. After #951 the tool name is gone from TOOL_NAMES. The
+    // current lenient parse keeps the entry alive — the runtime
+    // gating layer (`getActiveToolDescriptors`) silently no-ops on
+    // dead references when the tool isn't loaded, so the role still
+    // works for everything else and the user can clean up
+    // `manageRoles` from the list at their leisure.
     const legacyRole = {
       id: "my-role",
       name: "My Role",
@@ -50,6 +55,18 @@ describe("RoleSchema", () => {
       availablePlugins: ["manageRoles", "presentMulmoScript", "generateImage"],
     };
     const result = RoleSchema.parse(legacyRole);
+    assert.deepStrictEqual(result.availablePlugins, ["manageRoles", "presentMulmoScript", "generateImage"]);
+  });
+
+  it("drops empty strings from availablePlugins (only valid non-empty names survive)", () => {
+    const input = {
+      id: "test",
+      name: "Test",
+      icon: "star",
+      prompt: "prompt",
+      availablePlugins: ["presentMulmoScript", "", "generateImage"],
+    };
+    const result = RoleSchema.parse(input);
     assert.deepStrictEqual(result.availablePlugins, ["presentMulmoScript", "generateImage"]);
   });
 

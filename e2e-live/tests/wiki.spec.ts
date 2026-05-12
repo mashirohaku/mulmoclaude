@@ -59,12 +59,19 @@ test.describe("wiki image coverage (real workspace)", () => {
     }
   });
 
-  // L-W-S-03 (`<picture><source>...<img></picture>`) depends on
-  // Stage B widening the rewriter to `<source>` / `<video poster>`.
-  // Until that lands, the inner `<img>` does get rewritten by
-  // Stage A but the `<source srcset>` siblings would 404. Skipped
-  // on purpose so it stays visible in the report as a pending item.
-  test.skip("L-W-S-03: <picture><source><img></picture> renders (depends on Stage B / #1011)", async () => {});
+  // L-W-S-03 was originally framed as `<picture><source srcset>...<img></picture>`
+  // pending #1011 Stage B. Stage B did land (commit f3c52268,
+  // `feat: shared HTML URL-attr rewriter`) and widened the rewriter
+  // to `<source src>` / `<video poster|src>` / `<audio src>`, BUT
+  // `srcset` is explicitly deferred — see the deferred-list note on
+  // `RESOLVABLE_TAG_ATTRS` in `src/utils/image/htmlSrcAttrs.ts:21-24`.
+  // A `srcset` value is a comma-separated descriptor list (`url 1x, url2 2x`)
+  // and needs its own split/rewrite pass; the planned `<picture><source srcset>`
+  // canary stays blocked until that lands. Kept skipped so the spec
+  // file still surfaces the pending item in the report; rephrased
+  // owner trigger here so the next maintainer doesn't read the
+  // earlier comment and assume Stage B alone is sufficient.
+  test.skip("L-W-S-03: <picture><source srcset><img></picture> renders (waiting on srcset rewriter — Stage B deferred-list)", async () => {});
 
   test("L-W-S-04: broken-prefix <img> is repaired by useGlobalImageErrorRepair", async ({ page }) => {
     test.setTimeout(SPEC_TIMEOUT_MS);

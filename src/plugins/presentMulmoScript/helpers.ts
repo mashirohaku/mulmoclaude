@@ -88,6 +88,21 @@ export function validateBeatJSON(json: string, schema: SafeParseSchema): boolean
   return schema.safeParse(parsed).success;
 }
 
+/**
+ * Stable structural equality for two MulmoScripts via JSON
+ * canonicalisation. We compare the full re-serialised string
+ * rather than walking keys because (a) MulmoScript is
+ * deeply-nested and Object.keys-recursion would be ~50 lines, and
+ * (b) `JSON.stringify` already preserves insertion order, which
+ * `mulmoScriptSchema.safeParse` keeps stable across runs of the
+ * same input. False positives (= "differ" when they don't) only
+ * cost an extra `emit("updateResult", ...)` which is a no-op when
+ * data hasn't actually changed.
+ */
+export function isSameScript(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 /** Convert an unknown thrown value into a human-readable string. */
 export function extractErrorMessage(err: unknown): string {
   return errorMessage(err);

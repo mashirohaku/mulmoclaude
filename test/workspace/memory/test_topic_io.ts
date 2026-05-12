@@ -9,7 +9,6 @@ import path from "node:path";
 import {
   formatIndexLine,
   loadAllTopicFiles,
-  loadAllTopicFilesSync,
   regenerateTopicIndex,
   topicMemoryIndexPath,
   topicMemoryRoot,
@@ -45,12 +44,6 @@ describe("memory/topic-io — write + read round-trip", () => {
     assert.equal(loaded.topic, "music");
     assert.deepEqual(loaded.sections, ["Rock / Metal", "Punk / Melodic"]);
     assert.match(loaded.body, /Pantera/);
-  });
-
-  it("sync loader returns the same shape as the async loader", () => {
-    const sync = loadAllTopicFilesSync(workspaceRoot);
-    assert.equal(sync.length, 1);
-    assert.equal(sync[0].topic, "music");
   });
 
   it("rejects an unsafe topic slug rather than escaping the type subdir", async () => {
@@ -114,7 +107,6 @@ describe("memory/topic-io — reader tolerance", () => {
     const fresh = await mkdtemp(path.join(tmpdir(), "mulmoclaude-topic-io-empty-"));
     try {
       assert.deepEqual(await loadAllTopicFiles(fresh), []);
-      assert.deepEqual(loadAllTopicFilesSync(fresh), []);
     } finally {
       await rm(fresh, { recursive: true, force: true });
     }

@@ -2,12 +2,28 @@
 // bell side effects.
 
 import { publishNotification } from "../../events/notifications.js";
-import { NOTIFICATION_KINDS } from "../../../src/types/notification.js";
+import { NOTIFICATION_ACTION_TYPES, NOTIFICATION_KINDS, NOTIFICATION_VIEWS } from "../../../src/types/notification.js";
+import type { McpToolContext } from "./index.js";
 
 export type NotifyPublishFn = typeof publishNotification;
 
 export interface NotifyToolDeps {
   publish: NotifyPublishFn;
+}
+
+// When the bridge threads a chat session through, mark the
+// notification's primary action as "open the originating chat" so
+// the user can click the bell entry and land back on the session
+// that produced it (typically a scheduled / background chat that
+// finished while they were elsewhere). Without a session id, fall
+// back to plain push — entry is just dismissed on click, which is
+// the unchanged pre-fix behaviour.
+function buildNavigateAction(ctx?: McpToolContext) {
+  if (!ctx?.sessionId || ctx.sessionId.length === 0) return undefined;
+  return {
+    type: NOTIFICATION_ACTION_TYPES.navigate,
+    target: { view: NOTIFICATION_VIEWS.chat, sessionId: ctx.sessionId },
+  };
 }
 
 export function makeNotifyTool(deps: NotifyToolDeps) {
@@ -37,16 +53,18 @@ export function makeNotifyTool(deps: NotifyToolDeps) {
       "This is the canonical built-in notification path: it fans out to the web bell, any active bridge transport, and macOS Reminders (when MACOS_REMINDER_NOTIFICATIONS=1 + darwin), and has NO active-user suppression — if the user asks for a notification, fire one. " +
       "After firing, briefly tell the user you sent the notification.",
 
-    async handler(args: Record<string, unknown>): Promise<string> {
+    async handler(args: Record<string, unknown>, ctx?: McpToolContext): Promise<string> {
       const title = typeof args.title === "string" ? args.title.trim() : "";
       if (!title) return "notify: `title` is required (non-empty string).";
       const bodyRaw = typeof args.body === "string" ? args.body.trim() : "";
       const body = bodyRaw.length > 0 ? bodyRaw : undefined;
 
+      const action = buildNavigateAction(ctx);
       deps.publish({
         kind: NOTIFICATION_KINDS.push,
         title,
         body,
+        ...(action ? { action } : {}),
       });
       return body ? `Notification sent: ${title}\n${body}` : `Notification sent: ${title}`;
     },

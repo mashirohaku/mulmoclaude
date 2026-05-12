@@ -19,8 +19,11 @@
 // `getActiveToolDescriptors(role)` produces a single list of
 // `ActiveToolDescriptor` rows and the three call sites read whichever
 // fields they need (name only / name + prompt / name + endpoint).
-// Runtime plugins are auto-included regardless of role; static plugins
-// are still gated by `role.availablePlugins`. The MCP-prefixed full
+// EVERY tool source (static-gui, static-mcp, runtime) is gated by
+// `role.availablePlugins` — runtime plugins used to be auto-included
+// regardless, which surfaced as a real bug (preset plugins like
+// `manageRecipes` leaked into every role even though `cookingCoach`
+// was their intended home). The MCP-prefixed full
 // name is precomputed once so callers don't have to re-derive it.
 
 import type { Role } from "../../src/config/roles.js";
@@ -109,10 +112,17 @@ export function getActiveToolDescriptors(role: Role): ActiveToolDescriptor[] {
   for (const plugin of getRuntimePlugins()) {
     const def = plugin.definition;
     if (seen.has(def.name)) continue; // runtime-registry collision
-    // policy already filters static name collisions, but the
-    // build-time-bundle case (#1043 C-2 codex iter-7 medium) is not
-    // currently in the static set; the `seen` guard catches any
-    // duplicate that slipped through.
+    // Runtime plugins (preset + user-installed alike) are now gated
+    // by `role.availablePlugins`, mirroring the static-GUI / static-MCP
+    // loops above. Previously they were auto-included regardless of
+    // role — that broke the role's stated promise of "exactly these
+    // tools" and surfaced as a real bug when a non-cooking role
+    // started seeing `manageRecipes`. Roles that want a runtime
+    // plugin must list its `toolName` in `availablePlugins`. The
+    // Settings → Roles UI lets users add tool names per role; preset
+    // plugin names land in the `general` role's `availablePlugins`
+    // out of the box.
+    if (!allowed.has(def.name)) continue;
     out.push({
       name: def.name,
       fullName: fullNameFor(def.name),

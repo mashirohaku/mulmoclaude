@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { buildMemoryContext, buildMemoryManagementSection } from "../../server/agent/prompt.js";
+import { loadMemorySnapshot } from "../../server/workspace/memory/snapshot.js";
 
 describe("memory/format-detect — atomic workspace", () => {
   let scoped: string;
@@ -28,13 +29,13 @@ describe("memory/format-detect — atomic workspace", () => {
     await rm(scoped, { recursive: true, force: true });
   });
 
-  it("buildMemoryContext renders the atomic entry verbatim", () => {
-    const out = buildMemoryContext(scoped);
+  it("buildMemoryContext renders the atomic entry verbatim", async () => {
+    const out = buildMemoryContext(await loadMemorySnapshot(scoped), scoped);
     assert.match(out, /yarn 固定/);
   });
 
-  it("buildMemoryManagementSection emits the atomic-format instructions", () => {
-    const out = buildMemoryManagementSection(scoped);
+  it("buildMemoryManagementSection emits the atomic-format instructions", async () => {
+    const out = buildMemoryManagementSection(await loadMemorySnapshot(scoped));
     assert.match(out, /<type>_<short-slug>\.md/);
     assert.doesNotMatch(out, /<type>\/<topic>\.md/);
   });
@@ -74,8 +75,8 @@ describe("memory/format-detect — topic workspace", () => {
     await rm(scoped, { recursive: true, force: true });
   });
 
-  it("buildMemoryContext renders the topic file with its sections", () => {
-    const out = buildMemoryContext(scoped);
+  it("buildMemoryContext renders the topic file with its sections", async () => {
+    const out = buildMemoryContext(await loadMemorySnapshot(scoped), scoped);
     assert.match(out, /\[interest\] interest\/music\.md — Rock \/ Metal, Punk \/ Melodic/);
     assert.match(out, /Pantera, Metallica/);
   });
@@ -97,26 +98,26 @@ describe("memory/format-detect — topic workspace", () => {
     );
     await writeFile(path.join(scoped, "conversations", "memory.md"), "## Stale\n- should-not-leak-from-legacy", "utf-8");
 
-    const out = buildMemoryContext(scoped);
+    const out = buildMemoryContext(await loadMemorySnapshot(scoped), scoped);
     assert.doesNotMatch(out, /should-not-leak-from-atomic/, "atomic file at memory root must not bleed into topic-mode prompt");
     assert.doesNotMatch(out, /should-not-leak-from-legacy/, "legacy memory.md must not bleed into topic-mode prompt");
     // The topic file's content is still visible.
     assert.match(out, /Pantera, Metallica/);
   });
 
-  it("buildMemoryManagementSection emits the topic-format instructions", () => {
-    const out = buildMemoryManagementSection(scoped);
+  it("buildMemoryManagementSection emits the topic-format instructions", async () => {
+    const out = buildMemoryManagementSection(await loadMemorySnapshot(scoped));
     assert.match(out, /<type>\/<topic>\.md/);
     assert.match(out, /H2 sections/);
     assert.doesNotMatch(out, /<type>_<short-slug>\.md/);
   });
 
-  it("buildMemoryManagementSection includes the proactive-recall guidance (#1035)", () => {
+  it("buildMemoryManagementSection includes the proactive-recall guidance (#1035)", async () => {
     // The recall paragraph turns the topic-mode prompt from
     // "write here when something is durable" into "AND read this
     // when answering". Without it, the agent has the index but no
     // explicit cue to consult it before responding.
-    const out = buildMemoryManagementSection(scoped);
+    const out = buildMemoryManagementSection(await loadMemorySnapshot(scoped));
     assert.match(out, /Using memory proactively/);
     assert.match(out, /Before answering/);
     // Recall must NOT instruct the agent to narrate its memory use.

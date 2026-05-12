@@ -3,7 +3,7 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 import { TOOL_NAME as PRESENT_MULMO_SCRIPT_TOOL } from "../../src/plugins/presentMulmoScript/definition.ts";
-import { ONE_MINUTE_MS } from "../../server/utils/time.ts";
+import { ONE_MINUTE_MS, ONE_SECOND_MS } from "../../server/utils/time.ts";
 import {
   deleteSession,
   getCurrentSessionId,
@@ -19,21 +19,27 @@ const LEDIT_TIMEOUT_MS = 3 * ONE_MINUTE_MS;
 test.describe.configure({ mode: "parallel" });
 
 test.describe("mulmoScript edit (real workspace)", () => {
-  // Pending until issue #1074 is fixed: the per-beat "Saving…"
-  // button never flips back to enabled within 30s on chromium. The
-  // observation matches the suspicion raised in #1074 (edits don't
-  // round-trip cleanly), so this spec already encodes the failure
-  // mode — keep it on disk as the regression net, but skip so the
-  // suite stays green until the underlying save path is debugged.
-  //
-  // **Unskip trigger** (so this spec doesn't go permanently dormant):
-  // when issue #1074 is closed AND the merge that fixes it is
-  // available locally, run this spec by hand on chromium first
-  //     yarn test:e2e:live:mulmo-script-edit
-  // and only drop the `test.skip(true, ...)` line below if the run
-  // passes end-to-end. The TODO is owned by whoever closes #1074.
+  // Regression net for #1074. The fix has three parts:
+  //   1. View re-reads the script from disk on mount via
+  //      `refreshScriptFromDisk` (calling the reopen endpoint
+  //      `POST /api/mulmoScript/save` with `{ filePath }`), so an
+  //      in-SPA navigation that reuses the cached `ActiveSession`
+  //      still surfaces the latest disk content. Server-side
+  //      `enrichWithMulmoScript` only fires on `/api/sessions/:id`
+  //      (a full reload), so without this client-side refresh the
+  //      bug remained on the in-SPA path the user actually hits.
+  //   2. The post-click wait watches the textarea closing —
+  //      successful saves flip `sourceOpen[index] = false` which
+  //      removes the entire editor block via `v-if`. Earlier
+  //      versions waited for the button to re-enable, but the
+  //      button is gone from the DOM by then so `toBeEnabled`
+  //      always timed out at 30s.
+  //   3. The round-trip uses sidebar/session-tab clicks instead of
+  //      `page.goto` so the bug actually surfaces in the test —
+  //      `page.goto` triggers a full reload which goes through the
+  //      server enrichment and would mask a regression in the
+  //      View-side refresh.
   test("L-EDIT: beat 編集 → 更新 → 別セッションへ移動 → 戻ると編集が永続化されている", async ({ page }, testInfo) => {
-    test.skip(true, "Pending issue #1074 — drop this skip after #1074 closes and the spec passes once locally on chromium");
     test.setTimeout(LEDIT_TIMEOUT_MS);
     // Covers issue #1074 — beat edits made via the source-editor
     // textarea were reported to disappear after navigating away and
@@ -64,16 +70,22 @@ test.describe("mulmoScript edit (real workspace)", () => {
 
       await editBeat0Text(page, "L-EDIT marker via e2e-live");
 
-      // Navigate to /wiki and back. This still triggers the SPA
-      // route change + state reload that #1074 reported (the
-      // disappearing edit was tied to leaving and re-entering the
-      // chat surface), but it does NOT mint a second chat session
-      // the way startNewSession() would. Without this swap the
-      // cleanup branch would only delete the original session and
-      // leak the second one into the user's history every time.
-      await page.goto("/wiki");
+      // Navigate to /wiki and back via SPA-internal links — NOT
+      // `page.goto`. This is the actual #1074 repro path: a full
+      // reload triggers `/api/sessions/:id` which is already
+      // disk-enriched server-side (`enrichWithMulmoScript` in
+      // server/api/routes/sessions.ts), so the bug only surfaces
+      // when the SPA reuses its cached `ActiveSession` after
+      // in-app navigation. Clicking the sidebar Wiki launcher and
+      // then the session tab keeps the SPA mount alive — Vue
+      // Router pushes between routes, no /api/sessions re-fetch
+      // happens, and the View must re-read the script from disk
+      // itself to surface the edit. An earlier draft of this spec
+      // used `page.goto` for the round-trip and would have passed
+      // even with the View-side refresh removed.
+      await page.getByTestId("plugin-launcher-wiki").click();
       await page.waitForURL(/\/wiki/);
-      await page.goto(`/chat/${sessionId}`);
+      await page.getByTestId(`session-tab-${sessionId}`).click();
       await page.waitForURL(new RegExp(`/chat/${sessionId}$`));
       await expect(page.getByTestId("mulmo-script-generate-movie-button").first()).toBeVisible({ timeout: ONE_MINUTE_MS });
 
@@ -101,12 +113,17 @@ async function editBeat0Text(page: import("@playwright/test").Page, marker: stri
   }
   await textarea.fill(originalJson.replace('"text": ""', `"text": "${marker}"`));
   await page.getByTestId("mulmo-script-beat-update-button-0").click();
-  // The button flips to disabled while saving and back when done;
-  // wait for it to settle before navigating away. updateBeat hits
-  // the server, parses the JSON, rewrites the script file, and
-  // refreshes the studio context — give it 30s in case the disk
-  // I/O coincides with another beat's render.
-  await expect(page.getByTestId("mulmo-script-beat-update-button-0")).toBeEnabled({ timeout: 30_000 });
+  // `sourceOpen[index] = false` (which `v-if`-unmounts the editor)
+  // only fires on `response.ok` inside `updateBeat()` — see
+  // src/plugins/presentMulmoScript/View.vue. So waiting for the
+  // textarea to detach IS de-facto waiting for the network call to
+  // settle successfully; a 4xx/5xx leaves the editor open with an
+  // inline error and the test would (correctly) time out here.
+  // We avoid `toBeEnabled` because successful saves remove the
+  // button from the DOM entirely — the locator would retry forever.
+  // 30s leaves headroom for disk I/O coinciding with another beat's
+  // render.
+  await expect(textarea).toBeHidden({ timeout: 30 * ONE_SECOND_MS });
 }
 
 async function assertBeat0EditPersisted(page: import("@playwright/test").Page, marker: string): Promise<void> {

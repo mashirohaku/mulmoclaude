@@ -10,13 +10,12 @@
 // `memory.md` is intentionally NOT touched here; migration handles it.
 
 import { mkdir } from "node:fs/promises";
-import type { Stats } from "node:fs";
 import path from "node:path";
 
 import { parseFrontmatter, serializeWithFrontmatter } from "../../utils/markdown/frontmatter.js";
 import { writeFileAtomic } from "../../utils/files/atomic.js";
 import { WORKSPACE_DIRS, WORKSPACE_FILES } from "../paths.js";
-import { readDirSafe, readDirSafeAsync, readTextSafe, readTextSafeSync, statSafe, statSafeAsync } from "../../utils/files/safe.js";
+import { readDirSafeAsync, readTextSafe, statSafeAsync } from "../../utils/files/safe.js";
 import { log } from "../../system/logger/index.js";
 import { isMemoryType, type MemoryEntry, type MemoryType } from "./types.js";
 
@@ -136,38 +135,6 @@ async function listEntryFiles(dir: string): Promise<string[]> {
     if (stat?.isFile()) candidates.push(dirent.name);
   }
   return candidates.sort();
-}
-
-// Synchronous mirror of `loadAllMemoryEntries` for the agent prompt
-// builder, which is sync all the way up. Same skip rules and
-// frontmatter validation — corrupt entries log once and are excluded
-// instead of leaking raw markdown into the system prompt.
-export function loadAllMemoryEntriesSync(workspaceRoot: string): MemoryEntry[] {
-  const dir = memoryDirOf(workspaceRoot);
-  const dirents = readDirSafe(dir);
-  const filenames: string[] = [];
-  for (const dirent of dirents) {
-    if (!isCandidateName(dirent.name)) continue;
-    if (dirent.isFile()) {
-      filenames.push(dirent.name);
-      continue;
-    }
-    const stat: Stats | null = statSafe(path.join(dir, dirent.name));
-    if (stat?.isFile()) filenames.push(dirent.name);
-  }
-  filenames.sort();
-  const loaded: MemoryEntry[] = [];
-  for (const filename of filenames) {
-    const absPath = path.join(dir, filename);
-    const raw = readTextSafeSync(absPath);
-    if (raw === null) {
-      log.warn("memory", "failed to read entry", { path: absPath });
-      continue;
-    }
-    const entry = parseMemoryFile(absPath, raw);
-    if (entry) loaded.push(entry);
-  }
-  return loaded;
 }
 
 function isCandidateName(name: string): boolean {

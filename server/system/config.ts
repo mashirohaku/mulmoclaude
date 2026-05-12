@@ -30,6 +30,17 @@ export interface AppSettings {
   // prop from `App.vue`. Stored verbatim (local-desktop threat
   // model, same as Spotify token persistence).
   googleMapsApiKey?: string;
+
+  // Photo-EXIF auto-capture (#1222 PR-A). When `autoCapture` is true
+  // (the default), every saved attachment with an image MIME runs
+  // through `readPhotoExif` and a sidecar JSON lands at
+  // `data/locations/<YYYY>/<MM>/<id>.json`. Users opt out via
+  // Settings → Privacy when they don't want GPS metadata captured
+  // automatically (the future `manageMap` `extractExif` tool can
+  // still read EXIF on demand).
+  photoExif?: {
+    autoCapture: boolean;
+  };
 }
 
 const DEFAULT_SETTINGS: AppSettings = { extraAllowedTools: [] };
@@ -53,10 +64,15 @@ export function ensureConfigsDir(): void {
   mkdirSync(configsDir(), { recursive: true });
 }
 
+function isPhotoExifSettings(value: unknown): value is { autoCapture: boolean } {
+  return isRecord(value) && typeof value.autoCapture === "boolean";
+}
+
 export function isAppSettings(value: unknown): value is AppSettings {
   if (!isRecord(value)) return false;
   if (!isStringArray(value.extraAllowedTools)) return false;
   if (value.googleMapsApiKey !== undefined && typeof value.googleMapsApiKey !== "string") return false;
+  if (value.photoExif !== undefined && !isPhotoExifSettings(value.photoExif)) return false;
   return true;
 }
 
@@ -76,6 +92,7 @@ export function isAppSettingsPatch(value: unknown): value is Partial<AppSettings
   if (!isRecord(value)) return false;
   if (value.extraAllowedTools !== undefined && !isStringArray(value.extraAllowedTools)) return false;
   if (value.googleMapsApiKey !== undefined && typeof value.googleMapsApiKey !== "string") return false;
+  if (value.photoExif !== undefined && !isPhotoExifSettings(value.photoExif)) return false;
   return true;
 }
 
@@ -97,7 +114,17 @@ function cloneAppSettings(settings: AppSettings): AppSettings {
   if (settings.googleMapsApiKey !== undefined) {
     copy.googleMapsApiKey = settings.googleMapsApiKey;
   }
+  if (settings.photoExif !== undefined) {
+    copy.photoExif = { autoCapture: settings.photoExif.autoCapture };
+  }
   return copy;
+}
+
+/** Read the photo-exif auto-capture flag with the documented
+ *  default of `true`. Centralises the "missing block ⇒ on" rule so
+ *  the post-save hook + future Settings UI stay aligned. */
+export function isPhotoExifAutoCaptureEnabled(settings: AppSettings): boolean {
+  return settings.photoExif?.autoCapture ?? true;
 }
 
 export function loadSettings(): AppSettings {
@@ -106,11 +133,19 @@ export function loadSettings(): AppSettings {
   if (raw === null) return { ...DEFAULT_SETTINGS };
   const parsed = parseSettingsRaw(raw, file);
   if (parsed === null) return { ...DEFAULT_SETTINGS };
-  if (!isAppSettings(parsed)) {
+  // Accept the partial-patch shape, not just the full storage shape.
+  // A user who hand-edits `settings.json` to only set the fields they
+  // care about (`{ "photoExif": { "autoCapture": false } }` per the
+  // PR-A docs) shouldn't have their opt-out silently ignored just
+  // because `extraAllowedTools` is omitted. Missing fields fall back
+  // to DEFAULT_SETTINGS; only structurally-invalid payloads (wrong
+  // type on a present field) trigger the schema-warning fallback.
+  // (Codex review on PR #1247.)
+  if (!isAppSettingsPatch(parsed)) {
     log.warn("config", "settings.json does not match AppSettings schema — using defaults", { file });
     return { ...DEFAULT_SETTINGS };
   }
-  return cloneAppSettings(parsed);
+  return cloneAppSettings({ ...DEFAULT_SETTINGS, ...parsed });
 }
 
 export function saveSettings(settings: AppSettings): void {
@@ -121,6 +156,9 @@ export function saveSettings(settings: AppSettings): void {
   const payload: AppSettings = { extraAllowedTools: [...settings.extraAllowedTools] };
   if (settings.googleMapsApiKey !== undefined) {
     payload.googleMapsApiKey = settings.googleMapsApiKey;
+  }
+  if (settings.photoExif !== undefined) {
+    payload.photoExif = { autoCapture: settings.photoExif.autoCapture };
   }
   const serialised = JSON.stringify(payload, null, 2);
   writeFileAtomicSync(settingsPath(), `${serialised}\n`, { mode: 0o600 });

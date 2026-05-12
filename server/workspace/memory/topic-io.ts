@@ -19,7 +19,7 @@ import path from "node:path";
 
 import { parseFrontmatter, serializeWithFrontmatter } from "../../utils/markdown/frontmatter.js";
 import { writeFileAtomic } from "../../utils/files/atomic.js";
-import { readDirSafe, readDirSafeAsync, readTextSafe, readTextSafeSync } from "../../utils/files/safe.js";
+import { readDirSafeAsync, readTextSafe } from "../../utils/files/safe.js";
 import { log } from "../../system/logger/index.js";
 import { WORKSPACE_DIRS, WORKSPACE_FILES } from "../paths.js";
 import { isMemoryType, MEMORY_TYPES, type MemoryType } from "./types.js";
@@ -52,23 +52,6 @@ export async function loadAllTopicFiles(workspaceRoot: string): Promise<TopicMem
     for (const name of filenames) {
       const absPath = path.join(typeDir, name);
       const raw = await readTextSafe(absPath);
-      const file = parseTopicFile(absPath, raw, type);
-      if (file) collected.push(file);
-    }
-  }
-  return collected;
-}
-
-export function loadAllTopicFilesSync(workspaceRoot: string): TopicMemoryFile[] {
-  const root = topicMemoryRoot(workspaceRoot);
-  const collected: TopicMemoryFile[] = [];
-  for (const type of MEMORY_TYPES) {
-    const typeDir = path.join(root, type);
-    const dirents = readDirSafe(typeDir);
-    const filenames = candidateFilenamesSorted(dirents);
-    for (const name of filenames) {
-      const absPath = path.join(typeDir, name);
-      const raw = readTextSafeSync(absPath);
       const file = parseTopicFile(absPath, raw, type);
       if (file) collected.push(file);
     }

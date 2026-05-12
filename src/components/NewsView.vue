@@ -118,7 +118,7 @@
                 <div v-else-if="bodyError" class="text-sm text-red-600">{{ t("pluginNews.bodyError", { error: bodyError }) }}</div>
                 <div v-else-if="!body" class="text-sm text-gray-400 italic">{{ t("pluginNews.noBody") }}</div>
                 <!-- eslint-disable-next-line vue/no-v-html -- marked.parse output of app-owned news body; trusted in-process render -->
-                <div v-else class="markdown-content prose prose-slate max-w-none" v-html="renderedBody"></div>
+                <div v-else class="markdown-content prose prose-slate max-w-none" @click="handleExternalLinkClick" v-html="renderedBody"></div>
               </div>
             </div>
           </div>
@@ -144,6 +144,7 @@ import { API_ROUTES } from "../config/apiRoutes";
 import { apiGet } from "../utils/api";
 import { formatSmartTime } from "../utils/format/date";
 import { useNewsItems } from "../composables/useNewsItems";
+import { handleExternalLinkClick } from "../utils/dom/externalLink";
 import { useNewsReadState } from "../composables/useNewsReadState";
 import { parseFrontmatter } from "../utils/markdown/frontmatter";
 import FilterChip from "./FilterChip.vue";

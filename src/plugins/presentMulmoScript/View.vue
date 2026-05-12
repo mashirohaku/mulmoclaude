@@ -440,7 +440,7 @@ import { useI18n } from "vue-i18n";
 import type { ToolResultComplete } from "gui-chat-protocol/vue";
 import type { MulmoScriptData } from "./index";
 import { mulmoBeatSchema, mulmoScriptSchema } from "@mulmocast/types";
-import { extractErrorMessage, getMissingCharacterKeys, shouldAutoRenderBeat, streamMovieEvents, validateBeatJSON } from "./helpers";
+import { extractErrorMessage, getMissingCharacterKeys, isSameScript, shouldAutoRenderBeat, streamMovieEvents, validateBeatJSON } from "./helpers";
 import { apiGet, apiPost, apiFetchRaw } from "../../utils/api";
 import { pluginEndpoints } from "../api";
 import type { MulmoScriptEndpoints } from "./definition";
@@ -450,7 +450,6 @@ import { useActiveSession } from "../../composables/useActiveSession";
 import { GENERATION_KINDS, type PendingGeneration } from "../../types/events";
 
 const endpoints = pluginEndpoints<MulmoScriptEndpoints>("mulmoScript");
-const filesEndpoints = pluginEndpoints<{ content: string }>("files");
 
 const { t } = useI18n();
 
@@ -701,12 +700,18 @@ async function onSourceToggle(open: boolean) {
   editing.value = open;
   if (open) {
     let text = scriptSourceText.value;
-    // Read the current file from disk so beat-level edits are reflected
+    // Re-read the current file from disk so beat-level edits made
+    // since mount (other tabs, MCP, manual edits) surface in the
+    // editor. Uses the reopen endpoint for the same reason
+    // refreshScriptFromDisk does — `filePath.value` is the wire form
+    // `stories/<rel>` and only `mulmoScript.save` knows how to map
+    // it to the on-disk path under `artifacts/stories/...`. The
+    // generic `/api/files/content` 404s for that wire form (#1074
+    // post-mortem) and silently falls back to in-memory state.
     if (filePath.value) {
-      const response = await apiGet<{ content?: string }>(filesEndpoints.content, { path: filePath.value });
-      if (response.ok && response.data.content) {
-        text = response.data.content;
-      }
+      const response = await apiPost<{ data?: { script?: MulmoScript } }>(endpoints.save.url, { filePath: filePath.value });
+      const diskScript = response.ok ? response.data?.data?.script : undefined;
+      if (diskScript) text = JSON.stringify(diskScript, null, 2);
       // fall through to in-memory script on failure
     }
     editableSource.value = text;
@@ -1079,6 +1084,56 @@ async function hydrateBeatImage(beat: Beat, index: number, hasCharacters: boolea
   }
 }
 
+/**
+ * #1074 — keep the in-memory toolResult in sync with the on-disk
+ * script file. `update-beat` / `update-script` persist edits to
+ * disk, but the JSONL session entry that backs
+ * `props.selectedResult.data.script` is never rewritten, so a
+ * page reload + session-restore would otherwise surface stale
+ * pre-edit content.
+ *
+ * Why the reopen endpoint, not `/api/files/content`: `filePath`
+ * is the wire form `stories/<rel>` which `mulmoScript.save` knows
+ * how to translate back to the real on-disk path under
+ * `artifacts/stories/...` via `resolveStoryPath`. The generic
+ * file-content endpoint resolves against workspace root, so it
+ * 404s for the same wire form (and was silently masking #1074 in
+ * an earlier draft of this fix — see `[files] GET content: gated
+ * by resolve/stat` warnings in the server log). The reopen route
+ * is read-only when `script` is omitted; it does NOT trigger movie
+ * generation unless `autoGenerateMovie: true` is passed.
+ *
+ * The flow silently bails on every failure mode so a missing /
+ * malformed / deleted script file never blocks the rest of
+ * `initializeScript`.
+ *
+ * Stale-response guard: capture `uuid` + `filePath` before the
+ * `await`. If either has changed by the time the response lands
+ * (the user navigated to a different result while the request
+ * was in flight, or `props.selectedResult` was swapped under us
+ * by a parent watcher), drop the response on the floor — the new
+ * `initializeScript` invocation triggered by that change will
+ * issue its own refresh against the correct file.
+ */
+async function refreshScriptFromDisk(): Promise<void> {
+  const requestedFilePath = filePath.value;
+  if (!requestedFilePath) return;
+  const requestedUuid = props.selectedResult.uuid;
+  const response = await apiPost<{ data?: { script?: MulmoScript } }>(endpoints.save.url, { filePath: requestedFilePath });
+  if (props.selectedResult.uuid !== requestedUuid || filePath.value !== requestedFilePath) return;
+  if (!response.ok) return;
+  const diskScript = response.data?.data?.script;
+  // Server-side `loadScriptFromDisk` already validated against
+  // `mulmoScriptSchema`, so a non-null `script` is trusted here —
+  // we only need a presence check.
+  if (!diskScript) return;
+  if (isSameScript(diskScript, script.value)) return;
+  emit("updateResult", {
+    ...props.selectedResult,
+    data: { ...props.selectedResult.data, script: diskScript },
+  });
+}
+
 async function initializeScript() {
   // Reset scroll position so new results start at the top
   if (beatListEl.value) beatListEl.value.scrollTop = 0;
@@ -1100,6 +1155,20 @@ async function initializeScript() {
   Object.keys(beatDragOver).forEach((key) => Reflect.deleteProperty(beatDragOver, key));
   moviePath.value = null;
   if (sourceDetails.value) sourceDetails.value.open = false;
+
+  // #1074 — re-read the script file from disk before per-beat
+  // hydration. The server's `enrichWithMulmoScript`
+  // (server/api/routes/sessions.ts) already re-merges disk content
+  // into toolResult.data.script when the SPA reloads via
+  // `/api/sessions/:id`. But that path only fires on full page
+  // reload — when the user switches between tool results inside
+  // the same SPA mount and switches back, the in-memory ActiveSession
+  // toolResult still carries whatever script was captured when the
+  // SPA first booted, and `localOverrides` (the only thing showing
+  // the user's edit since the last save) is reset by initializeScript
+  // on remount. Re-fetching from disk via the reopen endpoint here
+  // covers that gap. See issue #1074 for the original repro.
+  await refreshScriptFromDisk();
 
   // Mount-time policy: prefer the existing PNG on the server. Every
   // beat — deterministic AND imagePrompt — first probes /beat-image,

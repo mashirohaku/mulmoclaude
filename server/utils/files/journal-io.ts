@@ -2,6 +2,7 @@ import path from "node:path";
 import fsp from "node:fs/promises";
 import { workspacePath } from "../../workspace/paths.js";
 import { writeFileAtomic } from "./atomic.js";
+import { writeJsonAtomic } from "./json.js";
 import { isEnoent } from "./safe.js";
 import { log } from "../../system/logger/index.js";
 import { summariesRoot, dailyPathFor, topicPathFor, TOPICS_DIR, INDEX_FILE, STATE_FILE, DAILY_DIR, ARCHIVE_DIR } from "../../workspace/journal/paths.js";
@@ -33,7 +34,7 @@ export async function readJournalState<T>(fallback: T, rootOverride?: string): P
 
 export async function writeJournalState(state: unknown, rootOverride?: string): Promise<void> {
   const filePath = path.join(summariesRoot(root(rootOverride)), STATE_FILE);
-  await writeFileAtomic(filePath, JSON.stringify(state, null, 2));
+  await writeJsonAtomic(filePath, state);
 }
 
 export async function writeJournalIndex(markdown: string, rootOverride?: string): Promise<void> {

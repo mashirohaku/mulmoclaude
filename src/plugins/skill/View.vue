@@ -1,17 +1,11 @@
 <template>
-  <!-- The canvas reserves the full pane height for the selected
-       result regardless of how much vertical space it actually
-       needs. Without explicit centering, a short collapsed skill
-       card sits top-anchored with a tall empty void below. Outer
-       is `h-full flex flex-col` so the inner can use `my-auto` to
-       vertically centre when the card is short, while still
-       falling back to natural top-alignment + scrolling when the
-       user expands the markdown body and content overflows
-       (auto-margins collapse to 0 in the overflow case, unlike
-       `justify-content: center` which would clip the top of tall
-       content out of reach). #1218 follow-up. -->
+  <!-- Top-anchored layout: the skill card sits flush against the
+       canvas top to match the other document-like plugins
+       (markdown, presentDocument, …). The canvas may reserve more
+       vertical space than the collapsed card needs; the empty pane
+       below is intentional and consistent with those siblings. -->
   <div class="h-full flex flex-col overflow-y-auto p-6">
-    <div class="my-auto max-w-3xl mx-auto w-full">
+    <div class="max-w-3xl mx-auto w-full">
       <div class="rounded-lg border border-purple-200 bg-purple-50 shadow-sm">
         <!-- Collapsed header — clickable. The whole card collapses by
              default; clicking expands the skill body. The use of
@@ -19,7 +13,11 @@
         <details class="group">
           <summary class="cursor-pointer list-none p-4 flex items-start gap-3 hover:bg-purple-100/40 rounded-lg" :data-testid="'skill-summary-' + skillName">
             <span class="material-icons text-purple-600 text-base mt-0.5 shrink-0">extension</span>
-            <div class="flex-1 min-w-0">
+            <!-- `grow shrink basis-0` instead of `flex-1` is intentional: StackView's
+                 `.stack-natural :deep(.flex-1) { flex: 0 0 auto !important }` rule (intended
+                 for vertical-flex content height) would otherwise pin this horizontal flex
+                 child to its content width, breaking long-description wrapping in stack mode. -->
+            <div class="grow shrink basis-0 min-w-0">
               <div class="flex items-baseline gap-2 flex-wrap">
                 <span class="font-medium text-purple-900">{{ skillName }}</span>
                 <span v-if="skillScope !== 'unknown'" class="text-[10px] uppercase tracking-wide text-purple-500 px-1.5 py-0.5 rounded-full bg-purple-100">
@@ -36,7 +34,7 @@
           <div class="border-t border-purple-200 p-4 bg-white rounded-b-lg">
             <div v-if="skillPath" class="text-[11px] font-mono text-gray-400 mb-3 break-all">{{ skillPath }}</div>
             <!-- eslint-disable-next-line vue/no-v-html -- DOMPurify-sanitized markdown of the SKILL.md body Claude CLI synthesised. The body comes from the user's local skill file, surfaced verbatim here. -->
-            <div class="markdown-content prose prose-slate max-w-none" v-html="renderedHtml"></div>
+            <div class="markdown-content prose prose-slate max-w-none" @click="handleExternalLinkClick" v-html="renderedHtml"></div>
           </div>
         </details>
       </div>
@@ -48,9 +46,10 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { marked } from "marked";
-import DOMPurify from "dompurify";
 import type { ToolResultComplete } from "gui-chat-protocol/vue";
 import type { SkillData } from "./types";
+import { handleExternalLinkClick } from "../../utils/dom/externalLink";
+import { sanitizeMarkdownHtml } from "../../utils/markdown/sanitize";
 
 const { t } = useI18n();
 
@@ -64,7 +63,7 @@ const skillPath = computed(() => props.selectedResult.data?.skillPath ?? null);
 const skillDescription = computed(() => props.selectedResult.data?.skillDescription ?? null);
 const body = computed(() => props.selectedResult.data?.body ?? "");
 
-const renderedHtml = computed(() => DOMPurify.sanitize(marked(body.value, { breaks: true, gfm: true }) as string));
+const renderedHtml = computed(() => sanitizeMarkdownHtml(marked(body.value, { breaks: true, gfm: true }) as string));
 </script>
 
 <style scoped>

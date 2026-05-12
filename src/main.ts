@@ -12,6 +12,7 @@ import { API_ROUTES } from "./config/apiRoutes";
 import { BUILTIN_ROLE_IDS } from "./config/roles";
 import { PAGE_ROUTES } from "./router";
 import { getAllPluginNames } from "./tools";
+import { setupMarked } from "./utils/markdown/setup";
 import "./index.css";
 import "material-icons/iconfont/material-icons.css";
 import "material-symbols/outlined.css";
@@ -53,12 +54,14 @@ const pluginEndpointRegistry: EndpointRegistry = {
   skills: API_ROUTES.skills,
   sources: API_ROUTES.sources,
   html: API_ROUTES.html,
+  svg: API_ROUTES.svg,
   chart: API_ROUTES.chart,
   accounting: API_ROUTES.accounting,
   canvas: API_ROUTES.canvas,
   form: API_ROUTES.form,
   markdown: API_ROUTES.markdown,
   spreadsheet: API_ROUTES.spreadsheet,
+  photoLocations: API_ROUTES.photoLocations,
   // Host-owned groups. `wiki` / `roles` live in `HOST_API_ROUTES`
   // as plain string URLs; `image` is a host-shared image store
   // with both a `generate`/`edit` plugin route and an `update`
@@ -104,6 +107,11 @@ loadRuntimePlugins().catch((err: unknown) => {
 // changes, this listener reloads the page. No-ops in production
 // because the server only publishes when a dev plugin is loaded.
 startDevPluginReloadListener();
+
+// Configure the shared `marked` instance — installs the wiki-embed
+// extension + built-in `[[amazon:...]]` / `[[isbn:...]]` handlers
+// before any view renders markdown. (#1221 PR-B)
+setupMarked();
 
 installGuards(router);
 

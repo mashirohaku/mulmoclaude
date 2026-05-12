@@ -31,6 +31,22 @@ export function htmlPreviewUrlFor(filePath: string | null): string | null {
   return `/artifacts/html/${rest.split("/").map(encodeURIComponent).join("/")}`;
 }
 
+// SVG artifacts are served by the `/artifacts/svg` static mount —
+// loaded into View / Preview via `<img src=...>`. The browser refuses
+// to execute `<script>` inside an SVG loaded as `<img>`, so a CSP
+// header is unnecessary on the server side. Same per-segment encode
+// pattern as the HTML helper so titles with spaces / `?` survive.
+const SVG_PREVIEW_DIR_PREFIX = "artifacts/svg/";
+
+export function svgPreviewUrlFor(filePath: string | null): string | null {
+  if (!filePath) return null;
+  if (!filePath.toLowerCase().endsWith(".svg")) return null;
+  if (!filePath.startsWith(SVG_PREVIEW_DIR_PREFIX)) return null;
+  const rest = filePath.slice(SVG_PREVIEW_DIR_PREFIX.length);
+  if (rest.length === 0) return null;
+  return `/artifacts/svg/${rest.split("/").map(encodeURIComponent).join("/")}`;
+}
+
 export function useContentDisplay(selectedPath: Ref<string | null>, content: Ref<FileContent | null>) {
   const isMarkdown = computed(() => hasExt(selectedPath.value, [".md", ".markdown"]));
   const isHtml = computed(() => hasExt(selectedPath.value, [".html", ".htm"]));

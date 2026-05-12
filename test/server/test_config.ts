@@ -95,6 +95,37 @@ describe("loadSettings", () => {
     assert.deepEqual(mod.loadSettings(), { extraAllowedTools: [] });
   });
 
+  // Codex review on PR #1247: a hand-edited partial settings file
+  // (`{ "photoExif": { "autoCapture": false } }`) was previously
+  // rejected by `loadSettings` because `extraAllowedTools` was
+  // mandatory in the schema, silently re-enabling auto-capture. The
+  // loader now accepts the patch shape and merges with defaults.
+  it("accepts a hand-edited partial file with photoExif but no extraAllowedTools", () => {
+    mod.ensureConfigsDir();
+    writeFileSync(mod.settingsPath(), JSON.stringify({ photoExif: { autoCapture: false } }));
+    const cfg = mod.loadSettings();
+    assert.deepEqual(cfg, {
+      extraAllowedTools: [],
+      photoExif: { autoCapture: false },
+    });
+    assert.equal(mod.isPhotoExifAutoCaptureEnabled(cfg), false);
+  });
+
+  it("accepts a hand-edited partial file with only googleMapsApiKey", () => {
+    mod.ensureConfigsDir();
+    writeFileSync(mod.settingsPath(), JSON.stringify({ googleMapsApiKey: "AIza..." }));
+    assert.deepEqual(mod.loadSettings(), {
+      extraAllowedTools: [],
+      googleMapsApiKey: "AIza...",
+    });
+  });
+
+  it("still falls back when a present field has the wrong type", () => {
+    mod.ensureConfigsDir();
+    writeFileSync(mod.settingsPath(), JSON.stringify({ extraAllowedTools: "not-array" }));
+    assert.deepEqual(mod.loadSettings(), { extraAllowedTools: [] });
+  });
+
   it("returns a defensive copy — mutating the result does not affect disk", () => {
     mod.saveSettings({ extraAllowedTools: ["x"] });
     const first = mod.loadSettings();

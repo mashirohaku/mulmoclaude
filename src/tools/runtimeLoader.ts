@@ -14,13 +14,18 @@
 // Failures don't abort boot — a single broken plugin logs a warning
 // and the rest of the app starts normally.
 
-import { defineComponent, h, markRaw, reactive } from "vue";
+import { defineAsyncComponent, defineComponent, h, markRaw, reactive } from "vue";
 import type { Component } from "vue";
 import type { ToolDefinition } from "gui-chat-protocol";
 import { apiGet } from "../utils/api";
 import { API_ROUTES } from "../config/apiRoutes";
-import PluginScopedRoot from "../components/PluginScopedRoot.vue";
 import type { PluginEntry } from "./types";
+
+// Lazy-imported so the module load doesn't pull in a `.vue` SFC
+// for callers that only touch the server-only fallback path
+// (e.g. `test/tools/test_runtimeLoader.ts` running under tsx in
+// Node, where there's no Vue plugin to compile SFCs).
+const PluginScopedRoot = defineAsyncComponent(() => import("../components/PluginScopedRoot.vue"));
 
 interface RuntimePluginListing {
   name: string;
@@ -65,6 +70,11 @@ export function getRuntimeToolNames(): string[] {
   return Array.from(runtimeRegistry.keys());
 }
 
+/** Test-only reset. */
+export function _resetRuntimeRegistryForTest(): void {
+  runtimeRegistry.clear();
+}
+
 function injectStyle(href: string): void {
   // Skip if a previous boot already added it (HMR / re-mount).
   if (document.querySelector(`link[data-runtime-plugin-css="${href}"]`)) return;
@@ -75,16 +85,70 @@ function injectStyle(href: string): void {
   document.head.appendChild(link);
 }
 
-async function loadOne(listing: RuntimePluginListing): Promise<void> {
+/** Build an entry from listing data only — used when the package
+ *  has no `dist/vue.js` (server-only plugin) or the bundle fails
+ *  to load. The role-editor picker only needs a name in
+ *  `getRuntimeToolNames()`; LLM dispatch goes through the MCP
+ *  server (not this entry), so empty `parameters` doesn't break
+ *  tool calling. */
+function listingFallbackEntry(listing: RuntimePluginListing): PluginEntry {
+  return {
+    toolDefinition: {
+      type: "function",
+      name: listing.toolName,
+      description: listing.description,
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  };
+}
+
+// Exported for unit tests so the fallback-registration contract
+// is pinned without spinning up the asset HTTP route.
+export async function loadOne(listing: RuntimePluginListing): Promise<void> {
+  // Register the fallback first so `getRuntimeToolNames()` lists
+  // the plugin immediately. If the Vue bundle loads we replace
+  // the entry with the richer one; if it doesn't (server-only
+  // plugin, or load failure), the fallback stays and the tool
+  // still appears in the role editor.
+  runtimeRegistry.set(listing.toolName, listingFallbackEntry(listing));
+
   const moduleUrl = `${listing.assetBase}/dist/vue.js`;
-  const cssUrl = `${listing.assetBase}/dist/style.css`;
-  injectStyle(cssUrl);
+
+  // HEAD-probe to distinguish "package has no Vue bundle" (404 —
+  // expected, server-only plugin path) from "bundle exists but
+  // can't be loaded" (warn — masks real bugs otherwise). Without
+  // this split, swallowing every dynamic-import failure silently
+  // would hide broken UI runtime plugins (bad asset path,
+  // transient fetch failure, malformed bundle) — the codex bot
+  // flagged this in PR #1273 review.
+  let probeStatus: number;
+  try {
+    const probe = await fetch(moduleUrl, { method: "HEAD" });
+    probeStatus = probe.status;
+  } catch (err) {
+    console.warn(`[runtime-plugin] HEAD probe failed for ${listing.name}@${listing.version}`, err);
+    return;
+  }
+
+  if (probeStatus === 404) {
+    // Server-only plugin (no Vue View). The fallback entry
+    // registered above is the final state.
+    return;
+  }
+  if (probeStatus !== 200) {
+    console.warn(`[runtime-plugin] unexpected HEAD status ${probeStatus} for ${listing.name}@${listing.version}`);
+    return;
+  }
 
   let mod: PluginVueModule;
   try {
     mod = (await import(/* @vite-ignore */ moduleUrl)) as PluginVueModule;
   } catch (err) {
-    console.warn(`[runtime-plugin] dynamic import failed: ${listing.name}@${listing.version}`, err);
+    // Asset is reachable but the import threw — parse error,
+    // module-evaluation crash, etc. This IS a real bug and must
+    // surface; the fallback stays so the tool name doesn't
+    // disappear from the role editor.
+    console.warn(`[runtime-plugin] dynamic import failed (asset reachable): ${listing.name}@${listing.version}`, err);
     return;
   }
   const plugin = mod.plugin ?? mod.default?.plugin;
@@ -92,12 +156,14 @@ async function loadOne(listing: RuntimePluginListing): Promise<void> {
     console.warn(`[runtime-plugin] plugin export missing toolDefinition: ${listing.name}`);
     return;
   }
-  const entry: PluginEntry = {
+  // Bundle loaded — inject CSS and upgrade the entry with the
+  // richer definition + view/preview components.
+  injectStyle(`${listing.assetBase}/dist/style.css`);
+  runtimeRegistry.set(listing.toolName, {
     toolDefinition: plugin.toolDefinition,
     viewComponent: wrapWithScopedRoot(plugin.viewComponent, listing.name),
     previewComponent: wrapWithScopedRoot(plugin.previewComponent, listing.name),
-  };
-  runtimeRegistry.set(listing.toolName, entry);
+  });
 }
 
 /** Wrap a plugin's component in `<PluginScopedRoot>` so descendants can

@@ -17,6 +17,13 @@ import {
 } from "../../server/agent/prompt.js";
 import { WORKSPACE_FILES } from "../../server/workspace/paths.js";
 import type { Role } from "../../src/config/roles.js";
+import type { MemorySnapshot } from "../../server/workspace/memory/snapshot.js";
+
+// Default empty snapshot used by every test that doesn't write any
+// memory entries (= all of them today — only legacy memory.md is
+// exercised, which the prompt builder reads separately from the
+// snapshot path).
+const EMPTY_ATOMIC_SNAPSHOT: MemorySnapshot = { format: "atomic", entries: [] };
 
 function ensureDir(dirPath: string): void {
   mkdirSync(dirPath, { recursive: true });
@@ -122,21 +129,21 @@ describe("headingSection", () => {
 describe("buildMemoryContext", () => {
   it("includes memory.md content when file exists", () => {
     writeFileAt(workspace, WORKSPACE_FILES.memory, "User prefers dark mode");
-    const result = buildMemoryContext(workspace);
+    const result = buildMemoryContext(EMPTY_ATOMIC_SNAPSHOT, workspace);
     assert.ok(result.includes("User prefers dark mode"));
     assert.ok(result.includes("## Memory"));
     assert.ok(result.includes('<reference type="memory">'));
   });
 
   it("includes helps hint even without memory.md", () => {
-    const result = buildMemoryContext(workspace);
+    const result = buildMemoryContext(EMPTY_ATOMIC_SNAPSHOT, workspace);
     assert.ok(result.includes("helps/index.md"));
     assert.ok(!result.includes("User prefers"));
   });
 
   it("skips empty memory.md", () => {
     writeFileAt(workspace, WORKSPACE_FILES.memory, "   \n  ");
-    const result = buildMemoryContext(workspace);
+    const result = buildMemoryContext(EMPTY_ATOMIC_SNAPSHOT, workspace);
     assert.ok(result.includes("helps/index.md"));
     // The empty content is trimmed, so it won't appear
     assert.ok(!result.includes("   "));
@@ -194,6 +201,7 @@ describe("buildSystemPrompt", () => {
       role,
       workspacePath: workspace,
       useDocker: false,
+      memorySnapshot: EMPTY_ATOMIC_SNAPSHOT,
     });
     assert.ok(result.includes("You are MulmoClaude"));
   });
@@ -204,6 +212,7 @@ describe("buildSystemPrompt", () => {
       role,
       workspacePath: workspace,
       useDocker: false,
+      memorySnapshot: EMPTY_ATOMIC_SNAPSHOT,
     });
     assert.ok(result.includes("You are a chef."));
   });
@@ -214,6 +223,7 @@ describe("buildSystemPrompt", () => {
       role,
       workspacePath: workspace,
       useDocker: false,
+      memorySnapshot: EMPTY_ATOMIC_SNAPSHOT,
     });
     assert.ok(result.includes(`Workspace directory: ${workspace}`));
   });
@@ -224,6 +234,7 @@ describe("buildSystemPrompt", () => {
       role,
       workspacePath: workspace,
       useDocker: false,
+      memorySnapshot: EMPTY_ATOMIC_SNAPSHOT,
     });
     assert.ok(result.includes("Image references in markdown / HTML"));
     // Each rule in the section must appear so a future refactor that
@@ -246,6 +257,7 @@ describe("buildSystemPrompt", () => {
       role,
       workspacePath: workspace,
       useDocker: false,
+      memorySnapshot: EMPTY_ATOMIC_SNAPSHOT,
     });
     // prompt.ts uses toLocalIsoDate — "what did I do today" is a wall-
     // clock question, not a UTC question. Mirror that here so the test
@@ -262,6 +274,7 @@ describe("buildSystemPrompt", () => {
       role,
       workspacePath: workspace,
       useDocker: false,
+      memorySnapshot: EMPTY_ATOMIC_SNAPSHOT,
     });
     assert.ok(result.includes("Remember this"));
   });
@@ -273,6 +286,7 @@ describe("buildSystemPrompt", () => {
       role,
       workspacePath: workspace,
       useDocker: false,
+      memorySnapshot: EMPTY_ATOMIC_SNAPSHOT,
     });
     assert.ok(result.includes("data/wiki/index.md"));
   });
@@ -283,6 +297,7 @@ describe("buildSystemPrompt", () => {
       role,
       workspacePath: workspace,
       useDocker: false,
+      memorySnapshot: EMPTY_ATOMIC_SNAPSHOT,
     });
     assert.ok(result.includes("No wiki exists yet"));
     assert.ok(result.includes("data/wiki/"));
@@ -299,6 +314,7 @@ describe("buildSystemPrompt", () => {
       role,
       workspacePath: workspace,
       useDocker: false,
+      memorySnapshot: EMPTY_ATOMIC_SNAPSHOT,
     });
     assert.ok(result.includes("## Plugin Instructions"));
     assert.ok(result.includes("- **mcp__mulmoclaude__openCanvas**: "));
@@ -313,6 +329,7 @@ describe("buildSystemPrompt", () => {
       role,
       workspacePath: workspace,
       useDocker: true,
+      memorySnapshot: EMPTY_ATOMIC_SNAPSHOT,
     });
     assert.ok(result.includes("## Sandbox Tools"));
     // A few key tool mentions so we notice if the list drifts.
@@ -327,6 +344,7 @@ describe("buildSystemPrompt", () => {
       role,
       workspacePath: workspace,
       useDocker: false,
+      memorySnapshot: EMPTY_ATOMIC_SNAPSHOT,
     });
     assert.ok(!result.includes("## Sandbox Tools"));
   });
@@ -337,6 +355,7 @@ describe("buildSystemPrompt", () => {
       role,
       workspacePath: workspace,
       useDocker: false,
+      memorySnapshot: EMPTY_ATOMIC_SNAPSHOT,
     });
     assert.ok(!result.includes("## Plugin Instructions"));
   });

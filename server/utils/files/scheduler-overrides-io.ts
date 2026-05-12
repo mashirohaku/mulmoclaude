@@ -2,8 +2,7 @@ import { mkdirSync } from "fs";
 import path from "path";
 import { workspacePath } from "../../workspace/paths.js";
 import { WORKSPACE_FILES } from "../../../src/config/workspacePaths.js";
-import { loadJsonFile } from "./json.js";
-import { writeFileAtomicSync } from "./atomic.js";
+import { loadJsonFile, writeJsonAtomicSync } from "./json.js";
 import { log } from "../../system/logger/index.js";
 import { isRecord } from "../types.js";
 
@@ -51,5 +50,5 @@ export function loadSchedulerOverrides(root?: string): ScheduleOverrides {
 export function saveSchedulerOverrides(overrides: ScheduleOverrides, root?: string): void {
   const filePath = overridesPath(root);
   mkdirSync(path.dirname(filePath), { recursive: true });
-  writeFileAtomicSync(filePath, JSON.stringify(overrides, null, 2));
+  writeJsonAtomicSync(filePath, overrides);
 }

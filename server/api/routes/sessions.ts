@@ -25,6 +25,7 @@ import { ONE_DAY_MS } from "../../utils/time.js";
 import { encodeCursor, parseCursor, sessionChangeMs } from "./sessionsCursor.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../system/logger/index.js";
+import { asyncHandler } from "../../utils/asyncHandler.js";
 
 interface SessionMeta {
   roleId: string;
@@ -355,14 +356,13 @@ router.post(API_ROUTES.sessions.markRead, async (req: Request<SessionIdParams>, 
 // Toggle the user-set bookmark flag on a session's meta sidecar.
 router.post(
   API_ROUTES.sessions.bookmark,
-  async (
-    req: Request<SessionIdParams, { ok: boolean } | SessionErrorResponse, { bookmarked: boolean }>,
-    res: Response<{ ok: boolean } | SessionErrorResponse>,
-  ) => {
-    const { id: sessionId } = req.params;
-    const bookmarked = Boolean(req.body?.bookmarked);
-    log.info("sessions", "bookmark: start", { sessionId, bookmarked });
-    try {
+  asyncHandler<Request<SessionIdParams, { ok: boolean } | SessionErrorResponse, { bookmarked: boolean }>, Response<{ ok: boolean } | SessionErrorResponse>>(
+    "sessions",
+    "Failed to update bookmark",
+    async (req, res) => {
+      const { id: sessionId } = req.params;
+      const bookmarked = Boolean(req.body?.bookmarked);
+      log.info("sessions", "bookmark: start", { sessionId, bookmarked });
       await updateIsBookmarked(sessionId, bookmarked);
       // Meta-mtime bumps on the write — cursor diff will pick up the
       // change on the next refetch — but every other tab also needs
@@ -370,11 +370,8 @@ router.post(
       publishSessionsChanged();
       log.info("sessions", "bookmark: ok", { sessionId, bookmarked });
       res.json({ ok: true });
-    } catch (err) {
-      log.error("sessions", "bookmark: threw", { sessionId, error: errorMessage(err) });
-      res.status(500).json({ error: "Failed to update bookmark" });
-    }
-  },
+    },
+  ),
 );
 
 // Hard-delete a session: remove the jsonl, meta sidecar, AND the
@@ -395,24 +392,22 @@ router.post(
 //   3. Only after disk is clean do we evict from the store and fire
 //      `notifySessionsChanged({ deletedIds })`. Now the broadcast is
 //      a truthful statement.
-router.delete(API_ROUTES.sessions.detail, async (req: Request<SessionIdParams>, res: Response<{ ok: boolean } | SessionErrorResponse>) => {
-  const { id: sessionId } = req.params;
-  log.info("sessions", "delete: start", { sessionId });
-  if (getSession(sessionId)?.isRunning) {
-    log.warn("sessions", "delete: refused — session running", { sessionId });
-    res.status(409).json({ error: "Session is running. Cancel the run before deleting." });
-    return;
-  }
-  try {
+router.delete(
+  API_ROUTES.sessions.detail,
+  asyncHandler<Request<SessionIdParams>, Response<{ ok: boolean } | SessionErrorResponse>>("sessions", "Failed to delete session", async (req, res) => {
+    const { id: sessionId } = req.params;
+    log.info("sessions", "delete: start", { sessionId });
+    if (getSession(sessionId)?.isRunning) {
+      log.warn("sessions", "delete: refused — session running", { sessionId });
+      res.status(409).json({ error: "Session is running. Cancel the run before deleting." });
+      return;
+    }
     await deleteSessionFiles(sessionId);
     await removeSessionFromIndex(workspacePath, sessionId);
     evictSession(sessionId);
     log.info("sessions", "delete: ok", { sessionId });
     res.json({ ok: true });
-  } catch (err) {
-    log.error("sessions", "delete: threw", { sessionId, error: errorMessage(err) });
-    res.status(500).json({ error: "Failed to delete session" });
-  }
-});
+  }),
+);
 
 export default router;

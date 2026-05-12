@@ -109,6 +109,20 @@ const HOST_WORKSPACE_DIRS = {
   // base64. Conversion artefacts (e.g. PPTX → PDF) live alongside
   // the original under the same YYYY/MM partition.
   attachments: "data/attachments",
+  // Sidecar JSON for photo EXIF capture (#1222 PR-A). Mirrors the
+  // attachments YYYY/MM partition: `data/locations/<YYYY>/<MM>/<id>.json`.
+  // Each file shape-compatible with `mapControl`'s addMarker args
+  // (lat/lng numbers) so the LLM can hand a sidecar straight to the
+  // Google Map plugin without reshape.
+  locations: "data/locations",
+  // Recipe markdown files driven by the `mc-cooking-coach` preset
+  // skill (#1286). Replaces the runtime plugin's `files.data` scope
+  // path (`data/plugins/<sanitised-pkg>/recipes/`) with a clean,
+  // human-readable canonical path. A boot-time migration helper
+  // (`server/workspace/cooking-recipes/migrate.ts`) moves any
+  // existing files from the legacy plugin path on first boot after
+  // the migration lands.
+  cookingRecipes: "data/cooking/recipes",
   transports: "data/transports",
   // artifacts/
   charts: "artifacts/charts",
@@ -123,6 +137,8 @@ const HOST_WORKSPACE_DIRS = {
   // overwritten. Kept separate so reloading a saved HTML artifact
   // doesn't clobber the current preview.
   html: "artifacts/html-scratch",
+  // `svgs` = `presentSVG` plugin output (vector graphics).
+  svgs: "artifacts/svg",
   images: "artifacts/images",
   spreadsheets: "artifacts/spreadsheets",
   stories: "artifacts/stories",

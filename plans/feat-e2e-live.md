@@ -354,7 +354,8 @@ e2e-live/
 | **L-21** chart deferred-tool dispatch | ✅ 実装済 | skills.spec.ts、 「`L-21 sales` の bar chart を chart tool で render して」 と prompt → `chart-card-0` + `chart-canvas-0` testid (`src/plugins/chart/View.vue` 既存) が visible になることを assert (B-41 canary)。 L-03 (presentMulmoScript) と異なる plugin で 2 本目の deferred dispatch canary を立て、 deferred mode で 1 plugin だけ schema 取りこぼす shear 退行を網羅。 LLM のばらつきを「`Do not narrate the result.`」 で抑え、 textResponse fallback を防ぐ |
 | **L-22** skill end-to-end 実行 (B-08) | ✅ 実装済 | skills.spec.ts、 合成 skill を `<workspace>/.claude/skills/<unique-slug>/SKILL.md` に seed (body には 「`/<slug>` で呼ばれたら `L22-OK-<nonce>` という marker を返答せよ」 の指示) → `/skills` 直叩き → 一覧に row 出現 → click で `skill-body-rendered` に marker が描画 → Run ボタン → `/chat/<id>` で agent ターン完走 → assistant 応答に同 marker が含まれることを assert。 discovery → list API → detail API → slash-command dispatch → skill body が agent context に乗る、 の 4 段全てが繋がっていないと marker が出ない設計。 nonce で他テストと衝突回避、 marker は ASCII の決定論的文字列で LLM 揺れ吸収 |
 | L-10, L-13, L-17, L-23〜L-30 | 未実装 | 後続 PR で順次。 L-10 / L-13 はサーバ再起動 (env unset / 再接続) が必要なので別インフラ skill で扱う。 L-17 は `00f4a740 fix(notifier): drop HTTP publish` で外部から bridge message を注入するルートが廃止されており、 test 用 inject 経路 (engine.publish 直叩き or socket.io 直接 emit) の追加が前提。 L-23〜L-30 は docker-only / manual-l4 |
-| **L-EDIT** beat 編集永続化 | 🟡 skip 中 | mulmo-script-edit.spec.ts、 #1074 で報告された「`Saving…` から戻らない」 症状を再現する spec として on disk。 **unskip trigger**: issue #1074 が close + その fix を merge した状態で `yarn test:e2e:live:mulmo-script-edit --project=chromium` を 1 回手動実行 (任意で `HEADED=1` を付けて UI で挙動を観察すると false-negative を避けやすい) し、 pass が確認できたら `test.skip(true, ...)` を削除する。 dormant 化を防ぐオーナーは #1074 を close する人 |
+| **L-EDIT** beat 編集永続化 | ✅ 実装済 (active) | mulmo-script-edit.spec.ts、 PR #1243 で #1074 fix と同梱で unskip 済 (`adcca773 fix: persist presentMulmoScript beat edits across page reload`)。 fixture json を seed → presentMulmoScript view を立ち上げ → beat 0 の source-editor textarea で `text: ""` → `"L-EDIT marker via e2e-live"` に書き換え → update ボタン押下 (`sourceOpen[index]=false` で textarea が `v-if` 解除されるのを成功シグナルに使う、 button が enabled に戻るのを待つと button 自体が DOM から消えてるので timeout する罠あり) → wiki launcher → session tab で SPA 内ナビゲーション (page.goto は server `enrichWithMulmoScript` で fix を bypass するので避ける) → marker が再表示される事を assert |
+| **L-W-S-03** `<picture><source srcset>` rewriter | 🟡 skip 中 | wiki.spec.ts、 `<picture><source srcset>` の rewriter 対応待ち。 #1011 Stage B (commit `f3c52268 feat: shared HTML URL-attr rewriter`) で `<source src>` / `<video poster\|src>` / `<audio src>` までは widen 済だが、 **`srcset` (comma-separated descriptor list) は明示的に deferred** (`src/utils/image/htmlSrcAttrs.ts:21-24` の deferred 注記参照)。 `srcset` 専用の split/rewrite pass が入った後に skip 解除する想定。 別の Stage B 効果 (`<video poster>` 等) を測りたければ別 spec として L-W-S-06+ を立てるのが筋 |
 
 ## 実装の詳細
 
@@ -914,9 +915,9 @@ artifact name: `mulmoclaude-tarball`（10 MB 程度、`.tgz`）。
 - L-03 実装中に発見した周辺 issue:
   - **#1049** mulmoclaude README に ffmpeg system 依存の明記がない（一般ユーザー向け docs gap、 動画生成は npx でも system ffmpeg 必要）
   - **#1073** presentMulmoScript の Play ボタン: text 空 beat で次に自動送りされない（schema は `duration` 用意済、 frontend が audio end のみを cue にしている疑い）
-  - **#1074** presentMulmoScript: beat 編集後「更新」 した内容が別セッションに戻ると消えている疑い（要調査） / L-EDIT spec が `Saving…` 状態から戻らない症状を再現
+  - ~~**#1074** presentMulmoScript: beat 編集後「更新」 した内容が別セッションに戻ると消えている疑い~~ → **CLOSED** (2026-05-09 / PR #1243 `adcca773 fix: persist presentMulmoScript beat edits across page reload`)。 L-EDIT spec は同 PR で unskip 済
 - L-06 / L-11 / L-14 (cross-category batch) 実装中に発見した周辺 issue:
-  - **#1102** wiki page で broken-prefix `<img>` の self-repair が発火しない (PR #974 / e2e-live L-W-S-04 chromium fail) — wiki カテゴリの既存 spec が chromium で fail する pre-existing 問題
+  - ~~**#1102** wiki page で broken-prefix `<img>` の self-repair が発火しない~~ → **CLOSED** (2026-05-09 / PR #1240 `c8b14e0c fix: image self-repair handles percent-encoded artifacts/images segment`)。 L-W-S-04 chromium が安定して pass する想定 (要 dev 再起動後の確認)
 
 ## 直近 main の動向 (#950〜#1000) と本テスト計画への反映
 

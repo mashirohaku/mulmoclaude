@@ -11,9 +11,11 @@ import { REGISTRATION as generateImageRegistration } from "../generateImage";
 import { REGISTRATION as manageSkillsRegistration } from "../manageSkills";
 import { REGISTRATION as manageSourceRegistration } from "../manageSource";
 import { REGISTRATION as markdownRegistration } from "../markdown";
+import { REGISTRATION as photoLocationsRegistration } from "../photoLocations";
 import { REGISTRATION as presentFormRegistration } from "../presentForm";
 import { REGISTRATION as presentHtmlRegistration } from "../presentHtml";
 import { REGISTRATION as presentMulmoScriptRegistration } from "../presentMulmoScript";
+import { REGISTRATION as presentSVGRegistration } from "../presentSVG";
 import { REGISTRATIONS as schedulerRegistrations } from "../scheduler";
 import { REGISTRATION as skillRegistration } from "../skill";
 import { REGISTRATION as spreadsheetRegistration } from "../spreadsheet";
@@ -33,9 +35,11 @@ export const GENERATED_PLUGIN_REGISTRATIONS: readonly PluginRegistration[] = [
   manageSkillsRegistration,
   manageSourceRegistration,
   markdownRegistration,
+  photoLocationsRegistration,
   presentFormRegistration,
   presentHtmlRegistration,
   presentMulmoScriptRegistration,
+  presentSVGRegistration,
   ...schedulerRegistrations,
   skillRegistration,
   spreadsheetRegistration,

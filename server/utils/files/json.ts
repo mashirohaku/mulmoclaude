@@ -1,5 +1,5 @@
 import { promises, readFileSync } from "fs";
-import { writeFileAtomic } from "./atomic.js";
+import { writeFileAtomic, writeFileAtomicSync } from "./atomic.js";
 import { isEnoent } from "./safe.js";
 import { log } from "../../system/logger/index.js";
 
@@ -29,6 +29,13 @@ export function loadJsonFile<T>(filePath: string, defaultValue: T): T {
 
 export async function writeJsonAtomic(filePath: string, data: unknown, opts: Parameters<typeof writeFileAtomic>[2] = {}): Promise<void> {
   await writeFileAtomic(filePath, JSON.stringify(data, null, 2), opts);
+}
+
+/** Sync sibling of `writeJsonAtomic`. The `JSON.stringify(d, null, 2)`
+ *  + `writeFileAtomicSync` shape was repeated across half a dozen
+ *  sync IO modules; this collapses them. */
+export function writeJsonAtomicSync(filePath: string, data: unknown, opts: Parameters<typeof writeFileAtomicSync>[2] = {}): void {
+  writeFileAtomicSync(filePath, JSON.stringify(data, null, 2), opts);
 }
 
 export async function readJsonOrNull<T>(filePath: string): Promise<T | null> {

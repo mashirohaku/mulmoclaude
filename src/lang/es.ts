@@ -151,6 +151,7 @@ const esMessages = {
       dirs: "Directorios",
       refs: "Directorios de referencia",
       map: "Mapa",
+      photos: "Fotos",
     },
     mapTab: {
       description: "Configura la clave de la API de Google Maps que usa el plugin de mapas. La clave se guarda localmente y solo se envía a Google Maps.",
@@ -161,6 +162,17 @@ const esMessages = {
       configured: "Configurada",
       notConfigured: "Sin configurar",
       clear: "Borrar",
+      loadError: "Error al cargar los ajustes",
+      saveError: "Error al guardar",
+    },
+    photosTab: {
+      description:
+        "Controles de privacidad para las fotos recibidas por chat o por un bridge conectado. Los datos de ubicación EXIF son sensibles — desmarca para desactivar la captura automática.",
+      autoCaptureLabel: "Capturar automáticamente la ubicación de las fotos",
+      autoCaptureHint:
+        "Activado: cada imagen subida con GPS en EXIF genera un sidecar de ubicación en data/locations/. Desactivado: no se captura nada automáticamente; el LLM aún puede extraer EXIF manualmente.",
+      statusOn: "Captura automática ACTIVADA",
+      statusOff: "Captura automática DESACTIVADA",
       loadError: "Error al cargar los ajustes",
       saveError: "Error al guardar",
     },
@@ -920,6 +932,21 @@ const esMessages = {
     loadingSource: "Cargando código…",
     sourceError: "Error al cargar el código: {error}",
   },
+  pluginPresentSvg: {
+    saveAsPng: "Descargar como PNG",
+    png: "PNG",
+    saveAsPdf: "Guardar como PDF (abre el diálogo de impresión)",
+    pdf: "PDF",
+    untitled: "Dibujo SVG",
+    editSource: "Editar código SVG",
+    cancel: "Cancelar",
+    applyChanges: "Aplicar cambios",
+    saving: "Guardando...",
+    saveError: "⚠ Error al guardar: {error}",
+    exportError: "⚠ Error al exportar: {error}",
+    loadingSource: "Cargando código…",
+    sourceError: "Error al cargar el código: {error}",
+  },
   pluginNews: {
     title: "Noticias",
     itemCount: "{unread} sin leer / {total} en total",
@@ -1006,6 +1033,14 @@ const esMessages = {
       noMatching: "No hay fuentes que coincidan con el filtro actual.",
       clearFilter: "Quitar filtro",
     },
+  },
+  photoLocations: {
+    title: "Ubicaciones de fotos",
+    summary: "{total} capturadas · {withGps} con GPS",
+    mapHint: 'Pide a Claude "muéstralas en el mapa" para trazarlas con el plugin de Google Map.',
+    loading: "Cargando…",
+    empty: "Aún no se ha capturado ninguna ubicación. Envía una foto con etiqueta GPS por el chat o un bridge conectado para empezar.",
+    noGps: "Sin datos GPS",
   },
   pluginManageSkills: {
     deleteProjectSkill: "Eliminar esta skill de proyecto",

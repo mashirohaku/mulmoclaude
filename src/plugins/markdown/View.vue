@@ -87,6 +87,7 @@ import { rewriteMarkdownImageRefs } from "../../utils/image/rewriteMarkdownImage
 import { findTaskLines, makeTasksInteractive, toggleTaskAt } from "../../utils/markdown/taskList";
 import { usePdfDownload } from "../../composables/usePdfDownload";
 import { apiGet, apiPut } from "../../utils/api";
+import { handleExternalLinkClick } from "../../utils/dom/externalLink";
 import { pluginEndpoints } from "../api";
 import { useClipboardCopy } from "../../composables/useClipboardCopy";
 import { buildPdfFilename } from "../../utils/files/filename";
@@ -354,6 +355,11 @@ async function persistTaskMarkdown(relativePath: string, markdown: string): Prom
 }
 
 function onMarkdownClick(event: MouseEvent): void {
+  // External http(s) links: open in a new tab instead of letting the
+  // SPA navigate away. Same handler the wiki / textResponse renders
+  // use; without it, clicking an external link from a markdown file
+  // tore the user out of MulmoClaude (#1221).
+  if (handleExternalLinkClick(event)) return;
   const { target } = event;
   if (!(target instanceof HTMLInputElement)) return;
   if (target.type !== "checkbox") return;

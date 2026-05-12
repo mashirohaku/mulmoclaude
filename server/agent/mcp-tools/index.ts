@@ -5,6 +5,17 @@ import { errorMessage } from "../../utils/errors.js";
 import { notFound, sendError, serverError } from "../../utils/httpError.js";
 import { API_ROUTES } from "../../../src/config/apiRoutes.js";
 
+// Per-call context the MCP bridge threads through to the tool handler.
+// Currently just the chat session id (extracted from the `?session=`
+// query string the bridge always appends, see mcp-server.ts), so a
+// tool like `notify` can mark its outgoing notification with a
+// click-target back to the originating chat. Optional because the
+// HTTP route is also reachable by non-bridge callers (tests, ad-hoc
+// scripts) that have no session.
+export interface McpToolContext {
+  sessionId?: string;
+}
+
 export interface McpTool {
   definition: {
     name: string;
@@ -13,7 +24,7 @@ export interface McpTool {
   };
   requiredEnv?: string[];
   prompt?: string;
-  handler: (args: Record<string, unknown>) => Promise<string>;
+  handler: (args: Record<string, unknown>, ctx?: McpToolContext) => Promise<string>;
 }
 
 export const mcpTools: McpTool[] = [readXPost, searchX, notify];
@@ -52,7 +63,9 @@ mcpToolsRouter.post(API_ROUTES.mcpTools.invoke, async (req: Request<McpToolParam
     return;
   }
   try {
-    const result = await tool.handler(req.body);
+    const sessionRaw = typeof req.query.session === "string" ? req.query.session : "";
+    const ctx: McpToolContext | undefined = sessionRaw.length > 0 ? { sessionId: sessionRaw } : undefined;
+    const result = await tool.handler(req.body, ctx);
     res.json({ result });
   } catch (err) {
     serverError(res, errorMessage(err));

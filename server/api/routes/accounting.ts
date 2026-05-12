@@ -36,6 +36,7 @@ import { ACCOUNTING_ACTIONS } from "../../../src/plugins/accounting/actions.js";
 import { API_ROUTES } from "../../../src/config/apiRoutes.js";
 import { bindRoute } from "../../utils/router.js";
 import { log } from "../../system/logger/index.js";
+import { asyncHandler } from "../../utils/asyncHandler.js";
 
 const router = Router();
 
@@ -335,32 +336,38 @@ async function dispatch(body: AccountingActionBody): Promise<unknown> {
 bindRoute(
   router,
   API_ROUTES.accounting.dispatch,
-  async (req: Request<object, unknown, AccountingActionBody>, res: Response<unknown | AccountingErrorResponse>) => {
-    // Validate the body shape up front so a missing / non-object body
-    // surfaces as a 400 instead of crashing `dispatch` and bubbling
-    // through to the 500 catch-all.
-    const { body } = req;
-    if (!body || typeof body !== "object" || typeof body.action !== "string") {
-      log.warn("accounting", "POST dispatch: invalid body");
-      res.status(400).json({ error: "request body must be an object with a string `action` field" });
-      return;
-    }
-    const { action } = body;
-    log.info("accounting", "POST dispatch: start", { action });
-    try {
-      const result = await dispatch(body);
-      log.info("accounting", "POST dispatch: ok", { action });
-      res.json(result);
-    } catch (err) {
-      if (err instanceof AccountingError) {
-        log.warn("accounting", "POST dispatch: error", { action, status: err.status, message: err.message });
-        res.status(err.status).json({ error: err.message, details: err.details });
+  asyncHandler<Request<object, unknown, AccountingActionBody>, Response<unknown | AccountingErrorResponse>>(
+    "accounting",
+    "accounting dispatch failed",
+    async (req, res) => {
+      // Validate the body shape up front so a missing / non-object body
+      // surfaces as a 400 instead of crashing `dispatch` and bubbling
+      // through to the 500 catch-all.
+      const { body } = req;
+      if (!body || typeof body !== "object" || typeof body.action !== "string") {
+        log.warn("accounting", "POST dispatch: invalid body");
+        res.status(400).json({ error: "request body must be an object with a string `action` field" });
         return;
       }
-      log.error("accounting", "POST dispatch: unexpected error", { action, error: err instanceof Error ? err.message : String(err) });
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
-    }
-  },
+      const { action } = body;
+      log.info("accounting", "POST dispatch: start", { action });
+      try {
+        const result = await dispatch(body);
+        log.info("accounting", "POST dispatch: ok", { action });
+        res.json(result);
+      } catch (err) {
+        // Domain errors (AccountingError) map to 4xx with `details`.
+        // Anything else rethrows — the asyncHandler wrapper catches
+        // it, logs `unexpected error`, and returns a generic 500.
+        if (err instanceof AccountingError) {
+          log.warn("accounting", "POST dispatch: error", { action, status: err.status, message: err.message });
+          res.status(err.status).json({ error: err.message, details: err.details });
+          return;
+        }
+        throw err;
+      }
+    },
+  ),
 );
 
 export default router;

@@ -18,15 +18,21 @@ import { writeFileAtomic } from "./atomic.js";
 import { yearMonthUtc } from "./naming.js";
 import { resolveWithinRoot } from "./safe.js";
 
-const ATTACHMENTS_DIR = WORKSPACE_PATHS.attachments;
-
-let attachmentsDirReal: string | null = null;
+// Cache the real-path resolution per workspace root so test setups
+// that override `WORKSPACE_PATHS.attachments` mid-run still work —
+// reading the path at call time (instead of capturing it at module
+// load) means a test that points the workspace at a tmp dir
+// recomputes everything from there.
+const attachmentsDirRealByRoot = new Map<string, string>();
 
 async function ensureAttachmentsDir(): Promise<string> {
-  if (attachmentsDirReal) return attachmentsDirReal;
-  await mkdir(ATTACHMENTS_DIR, { recursive: true });
-  attachmentsDirReal = await realpath(ATTACHMENTS_DIR);
-  return attachmentsDirReal;
+  const root = WORKSPACE_PATHS.attachments;
+  const cached = attachmentsDirRealByRoot.get(root);
+  if (cached) return cached;
+  await mkdir(root, { recursive: true });
+  const real = await realpath(root);
+  attachmentsDirRealByRoot.set(root, real);
+  return real;
 }
 
 async function safeResolve(relativePath: string): Promise<string> {
@@ -50,6 +56,16 @@ const MIME_EXT: Readonly<Record<string, string>> = {
   "image/webp": ".webp",
   "image/gif": ".gif",
   "image/svg+xml": ".svg",
+  // HEIC / HEIF — iOS default capture format. Without these
+  // entries, an iPhone upload was getting saved as `<id>.bin` and
+  // looked broken in the Files panel even though the bytes were
+  // intact (#1222 PR-A follow-up). The EXIF reader treats both
+  // MIMEs as supported, so the upload pipeline must too.
+  "image/heic": ".heic",
+  "image/heif": ".heif",
+  // TIFF — exifr can read it, and the photo plugin enumerates it
+  // as a supported source format. Same rationale as HEIC.
+  "image/tiff": ".tif",
   "application/pdf": ".pdf",
   "application/json": ".json",
   "application/xml": ".xml",
@@ -77,6 +93,10 @@ const EXT_MIME: Readonly<Record<string, string>> = {
   ".webp": "image/webp",
   ".gif": "image/gif",
   ".svg": "image/svg+xml",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
+  ".tif": "image/tiff",
+  ".tiff": "image/tiff",
   ".pdf": "application/pdf",
   ".json": "application/json",
   ".xml": "application/xml",
@@ -109,6 +129,40 @@ export interface SavedAttachment {
   mimeType: string;
 }
 
+/** Post-save hook fired after every successful `saveAttachment`.
+ *  Receives the absolute on-disk path, the workspace-relative path
+ *  (the same one returned to the caller), and the MIME type the
+ *  bytes were saved with. Hooks must NEVER throw — the upload is
+ *  already on disk by the time the hook runs, so a failure should
+ *  log and return, not propagate. Multiple hooks fan out via
+ *  `Promise.allSettled` so one slow / failing hook can't block or
+ *  break the others. (#1222 PR-A.) */
+export type SaveAttachmentHook = (absPath: string, relativePath: string, mimeType: string) => Promise<void>;
+
+const saveAttachmentHooks: SaveAttachmentHook[] = [];
+
+/** Register a hook that runs after every saved attachment. Returns
+ *  an unregister function so test setups can install + tear down a
+ *  hook without leaking state into the next test. Production
+ *  registrations live in `server/index.ts` boot. */
+export function registerSaveAttachmentHook(hook: SaveAttachmentHook): () => void {
+  saveAttachmentHooks.push(hook);
+  return () => {
+    const idx = saveAttachmentHooks.indexOf(hook);
+    if (idx !== -1) saveAttachmentHooks.splice(idx, 1);
+  };
+}
+
+async function runSaveAttachmentHooks(absPath: string, relativePath: string, mimeType: string): Promise<void> {
+  if (saveAttachmentHooks.length === 0) return;
+  // Snapshot the array so a hook that calls `registerSaveAttachmentHook`
+  // (or its unregister fn) during this loop doesn't mutate the
+  // iteration order. `allSettled` so one failing hook doesn't stop
+  // the others — failures are the hook's responsibility to log.
+  const snapshot = [...saveAttachmentHooks];
+  await Promise.allSettled(snapshot.map((hook) => hook(absPath, relativePath, mimeType)));
+}
+
 /** Save a single attachment under data/attachments/YYYY/MM/. The
  *  caller picks the ID; companions (e.g. PPTX → PDF) reuse it via
  *  `saveCompanion()` so they share the same numeric prefix. */
@@ -117,12 +171,15 @@ export async function saveAttachment(base64Data: string, mimeType: string): Prom
   const partition = yearMonthUtc();
   const ext = extensionForMime(mimeType);
   const filename = `${shortId()}${ext}`;
-  const absPath = path.join(ATTACHMENTS_DIR, partition, filename);
+  const absPath = path.join(WORKSPACE_PATHS.attachments, partition, filename);
   await writeFileAtomic(absPath, Buffer.from(base64Data, "base64"));
-  return {
-    relativePath: path.posix.join(WORKSPACE_DIRS.attachments, partition, filename),
-    mimeType,
-  };
+  const relativePath = path.posix.join(WORKSPACE_DIRS.attachments, partition, filename);
+  // Hooks (e.g. photo-EXIF capture) are awaited so callers can rely
+  // on the sidecar existing by the time `saveAttachment` resolves —
+  // simplifies test assertions and removes a class of race conditions
+  // for downstream tools that read sidecars right after upload.
+  await runSaveAttachmentHooks(absPath, relativePath, mimeType);
+  return { relativePath, mimeType };
 }
 
 /** Save a companion file (e.g. PPTX → PDF) alongside an existing

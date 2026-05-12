@@ -17,6 +17,7 @@
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
+import { errorMessage } from "../utils/errors.js";
 
 const PRESET_SLUG_PREFIX = "mc-";
 const SKILL_FILENAME = "SKILL.md";
@@ -161,7 +162,7 @@ export function syncPresetSkills(opts: SyncPresetSkillsOptions): SyncPresetSkill
   try {
     sourceInfo = statSync(opts.sourceDir);
   } catch (err) {
-    const reason = `source path stat failed: ${err instanceof Error ? err.message : String(err)}`;
+    const reason = `source path stat failed: ${errorMessage(err)}`;
     result.skipped.push(`${opts.sourceDir}: ${reason}`);
     opts.onWarn?.("preset sync aborted", { sourceDir: opts.sourceDir, reason });
     return result;

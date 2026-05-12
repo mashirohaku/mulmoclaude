@@ -341,7 +341,11 @@ function pipeWithErrorHandling(stream: ReadStream, res: Response<ErrorResponse>)
       res.destroy(err);
       return;
     }
-    serverError(res, `Failed to read file: ${err.message}`);
+    // The raw `err.message` carries filesystem paths / system error
+    // detail — keep it in the server log but ship a stable opaque
+    // string to the client. Same threat model as `asyncHandler`.
+    log.error("files", "raw stream error", { error: errorMessage(err) });
+    serverError(res, "Failed to read file");
   });
   stream.pipe(res);
 }
@@ -497,7 +501,7 @@ router.get(API_ROUTES.files.tree, async (_req: Request<object, unknown, unknown,
     res.json(tree);
   } catch (err) {
     log.error("files", "GET tree: threw", { error: errorMessage(err) });
-    serverError(res, `Failed to read workspace: ${errorMessage(err)}`);
+    serverError(res, "Failed to read workspace");
   }
 });
 
@@ -560,7 +564,7 @@ router.get(API_ROUTES.files.dir, async (req: Request<object, unknown, unknown, P
     res.json(listing);
   } catch (err) {
     log.error("files", "GET dir: threw", { pathPreview: previewSnippet(relPath), error: errorMessage(err) });
-    serverError(res, `Failed to read directory: ${errorMessage(err)}`);
+    serverError(res, "Failed to read directory");
   }
 });
 
@@ -700,7 +704,7 @@ router.get(API_ROUTES.files.content, (req: Request<object, unknown, unknown, Pat
     content = readFileSync(absPath, "utf-8");
   } catch (err) {
     log.error("files", "GET content: read threw", { pathPreview: previewSnippet(relPath), error: errorMessage(err) });
-    serverError(res, `Failed to read file: ${errorMessage(err)}`);
+    serverError(res, "Failed to read file");
     return;
   }
   log.info("files", "GET content: ok", { pathPreview: previewSnippet(relPath), bytes: stat.size });
@@ -818,7 +822,7 @@ router.put(API_ROUTES.files.content, async (req: Request<object, unknown, WriteC
     await writeFileContent(resolved.absPath, content);
   } catch (err) {
     log.error("files", "PUT content: write threw", { pathPreview: previewSnippet(relPath), error: errorMessage(err) });
-    serverError(res, `Failed to write file: ${errorMessage(err)}`);
+    serverError(res, "Failed to write file");
     return;
   }
   const fresh = await statSafeAsync(resolved.absPath);

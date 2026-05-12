@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { formatDate, formatDateTime, formatTime, formatShortTime, formatShortDate } from "../../../src/utils/format/date.js";
+import { formatDate, formatDateTime, formatTime, formatShortTime, formatShortDate, formatMonthYear } from "../../../src/utils/format/date.js";
 
 describe("formatDate", () => {
   it("returns a non-empty string for a valid ISO date", () => {
@@ -71,5 +71,35 @@ describe("formatShortDate", () => {
     const out = formatShortDate(Date.now());
     assert.equal(typeof out, "string");
     assert.match(out, /\d/);
+  });
+});
+
+describe("formatMonthYear", () => {
+  // Fixed instant — using `Date.now()` would make the suite
+  // non-deterministic (Sourcery #1316). The exact picked instant
+  // doesn't matter, only that all three input shapes below address
+  // the same moment so the equivalence assertion is meaningful.
+  const FIXED_INSTANT = new Date(Date.UTC(2026, 3, 10, 12, 0, 0));
+  const FIXED_EPOCH = FIXED_INSTANT.getTime();
+  const FIXED_ISO = FIXED_INSTANT.toISOString();
+
+  it("returns a non-empty string from a Date", () => {
+    const out = formatMonthYear(FIXED_INSTANT);
+    assert.equal(typeof out, "string");
+    assert.ok(out.length > 0);
+  });
+
+  it("returns the same string for equivalent Date / epoch ms / ISO inputs", () => {
+    // Locale-agnostic structural invariant (Codex #1316): assert
+    // that the three input shapes produce identical output for the
+    // same instant, not that the output matches a literal year /
+    // digit sequence (which would break in non-ASCII-digit or
+    // non-Gregorian locales).
+    const fromDate = formatMonthYear(FIXED_INSTANT);
+    const fromEpoch = formatMonthYear(FIXED_EPOCH);
+    const fromIso = formatMonthYear(FIXED_ISO);
+    assert.equal(fromEpoch, fromDate);
+    assert.equal(fromIso, fromDate);
+    assert.ok(fromDate.length > 0);
   });
 });

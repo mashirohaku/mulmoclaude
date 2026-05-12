@@ -4,6 +4,7 @@ import {
   applyMovieEvent,
   extractErrorMessage,
   getMissingCharacterKeys,
+  isSameScript,
   parseSSEEventLine,
   shouldAutoRenderBeat,
   streamMovieEvents,
@@ -328,5 +329,34 @@ describe("streamMovieEvents", () => {
     const spy = makeSpy();
     await streamMovieEvents(streamFromChunks([]), spy.handlers);
     assert.equal(spy.calls.length, 0);
+  });
+});
+
+describe("isSameScript (#1074)", () => {
+  it("returns true when two scripts serialise identically", () => {
+    const left = { title: "x", beats: [{ text: "" }] };
+    const right = { title: "x", beats: [{ text: "" }] };
+    assert.equal(isSameScript(left, right), true);
+  });
+
+  it("returns false when a single field differs", () => {
+    const left = { title: "x", beats: [{ text: "" }] };
+    const right = { title: "x", beats: [{ text: "edited" }] };
+    assert.equal(isSameScript(left, right), false);
+  });
+
+  it("treats different key insertion order as different — false negatives are cheap, false positives are not", () => {
+    // We intentionally rely on JSON.stringify's insertion-order
+    // semantics here. If two scripts have the same fields but
+    // different key order this returns false, which costs us one
+    // wasted `emit("updateResult", ...)` — strictly safer than
+    // dropping a real edit on the floor.
+    const left = { title: "x", lang: "en" };
+    const right = { lang: "en", title: "x" };
+    assert.equal(isSameScript(left, right), false);
+  });
+
+  it("returns true for two empty objects", () => {
+    assert.equal(isSameScript({}, {}), true);
   });
 });

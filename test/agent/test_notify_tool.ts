@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { notify, makeNotifyTool, type NotifyPublishFn } from "../../server/agent/mcp-tools/notify.js";
 import { mcpTools } from "../../server/agent/mcp-tools/index.js";
-import { NOTIFICATION_KINDS } from "../../src/types/notification.js";
+import { NOTIFICATION_ACTION_TYPES, NOTIFICATION_KINDS, NOTIFICATION_VIEWS } from "../../src/types/notification.js";
 
 // Capture each `publish` call so tests can assert on the args
 // without firing the real publishNotification (which on darwin
@@ -76,6 +76,35 @@ describe("notify MCP tool — happy path", () => {
     const result = await tool.handler({ title: "hi", body: "   " });
     assert.equal(result, "Notification sent: hi");
     assert.equal(calls[0].body, undefined);
+  });
+});
+
+describe("notify MCP tool — chat session linkback", () => {
+  it("publishes a navigate action targeting the chat session when ctx carries sessionId", async () => {
+    const { publish, calls } = makeMockPublish();
+    const tool = makeNotifyTool({ publish });
+    await tool.handler({ title: "Build done" }, { sessionId: "sess-abc-123" });
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].action, {
+      type: NOTIFICATION_ACTION_TYPES.navigate,
+      target: { view: NOTIFICATION_VIEWS.chat, sessionId: "sess-abc-123" },
+    });
+  });
+
+  it("omits the action when ctx is undefined (e.g. test / ad-hoc HTTP caller)", async () => {
+    const { publish, calls } = makeMockPublish();
+    const tool = makeNotifyTool({ publish });
+    await tool.handler({ title: "Build done" });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].action, undefined);
+  });
+
+  it("omits the action when sessionId is empty string", async () => {
+    const { publish, calls } = makeMockPublish();
+    const tool = makeNotifyTool({ publish });
+    await tool.handler({ title: "Build done" }, { sessionId: "" });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].action, undefined);
   });
 });
 

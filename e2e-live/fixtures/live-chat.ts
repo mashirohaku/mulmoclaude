@@ -68,6 +68,19 @@ export async function removeFromWorkspace(workspaceRel: string): Promise<void> {
 }
 
 /**
+ * Write `body` to a workspace-relative file, creating intermediate
+ * dirs. Like {@link placeFixtureInWorkspace} but for inline content
+ * (no source file on disk to copy from). Returns the absolute path so
+ * the spec can hand it to {@link removeFromWorkspace} for cleanup.
+ */
+export async function placeWorkspaceFile(workspaceRel: string, body: string): Promise<string> {
+  const dst = resolveWorkspacePath(workspaceRel);
+  await mkdir(path.dirname(dst), { recursive: true });
+  await writeFile(dst, body, "utf8");
+  return dst;
+}
+
+/**
  * Drop a wiki page directly onto disk at `data/wiki/pages/<slug>.md`.
  * The wiki view fetches /api/wiki?slug=<slug> on navigate, which
  * reads the same file — so seeding the file is enough to make a page

@@ -21,6 +21,12 @@ MulmoClaude is a text/task-driven agent app with rich visual output. It uses **C
 
 ## Key Rules (always apply)
 
+### Shared utilities — check before reinventing
+
+Before writing a new helper, scan [`docs/shared-utils.md`](docs/shared-utils.md). If a similar helper exists, use it. When you add a new shared helper (cross-cutting formatter, error normaliser, path joiner, etc.) append a 1-line entry to that catalog **in the same PR**.
+
+Skipping this step is how `truncate()` ended up with 6 implementations and `err instanceof Error ? err.message : String(err)` got inlined 30+ times despite `errorMessage()` existing in `server/utils/errors.ts`. The catalog is the prevention mechanism (#1304).
+
 ### Constants — no magic literals
 
 - **Time**: NEVER use raw numbers (`1000`, `60000`, `3600000`). Import from `server/utils/time.ts`

@@ -258,7 +258,7 @@ import { apiPost } from "../../utils/api";
 import { pluginEndpoints } from "../api";
 import type { SchedulerEndpoints } from "./automationsDefinition";
 import TasksTab from "./TasksTab.vue";
-import { isToday } from "../../utils/format/date";
+import { isToday, formatShortDate, formatMonthYear } from "../../utils/format/date";
 import { errorMessage } from "../../utils/errors";
 import { SCHEDULER_VIEW, SCHEDULER_VIEW_MODES as VIEW_MODES, SCHEDULER_TAB, type SchedulerViewMode as ViewMode, type SchedulerTab } from "./viewModes";
 
@@ -388,13 +388,9 @@ const monthGrid = computed(() => getMonthGrid(currentDate.value.getFullYear(), c
 const headerLabel = computed(() => {
   if (viewMode.value === "week") {
     const days = weekDays.value;
-    const fmt = (date: Date) => date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-    return `${fmt(days[0])} – ${fmt(days[6])}, ${days[0].getFullYear()}`;
+    return `${formatShortDate(days[0])} – ${formatShortDate(days[6])}, ${days[0].getFullYear()}`;
   }
-  return currentDate.value.toLocaleDateString(undefined, {
-    month: "long",
-    year: "numeric",
-  });
+  return formatMonthYear(currentDate.value);
 });
 
 function goToday() {

@@ -167,6 +167,7 @@ const enMessages = {
       dirs: "Directories",
       refs: "Reference Dirs",
       map: "Map",
+      photos: "Photos",
     },
     mapTab: {
       description: "Set the Google Maps API key used by the map plugin. The key is stored locally and never transmitted anywhere except to Google Maps.",
@@ -177,6 +178,17 @@ const enMessages = {
       configured: "Configured",
       notConfigured: "Not configured",
       clear: "Clear",
+      loadError: "Failed to load settings",
+      saveError: "Failed to save",
+    },
+    photosTab: {
+      description:
+        "Privacy controls for photos uploaded via chat or a connected bridge. EXIF location data is sensitive — uncheck the box to opt out of automatic capture.",
+      autoCaptureLabel: "Auto-capture photo location data",
+      autoCaptureHint:
+        "When on, every uploaded image with EXIF GPS gets a location sidecar at data/locations/. Off: nothing is captured automatically; the LLM can still extract EXIF on demand.",
+      statusOn: "Auto-capture is ON",
+      statusOff: "Auto-capture is OFF",
       loadError: "Failed to load settings",
       saveError: "Failed to save",
     },
@@ -908,6 +920,21 @@ const enMessages = {
     loadingSource: "Loading source…",
     sourceError: "Failed to load source: {error}",
   },
+  pluginPresentSvg: {
+    saveAsPng: "Download as PNG",
+    png: "PNG",
+    saveAsPdf: "Save as PDF (opens print dialog)",
+    pdf: "PDF",
+    untitled: "SVG Drawing",
+    editSource: "Edit SVG Source",
+    cancel: "Cancel",
+    applyChanges: "Apply Changes",
+    saving: "Saving...",
+    saveError: "⚠ Save failed: {error}",
+    exportError: "⚠ Export failed: {error}",
+    loadingSource: "Loading source…",
+    sourceError: "Failed to load source: {error}",
+  },
   pluginNews: {
     title: "News",
     itemCount: "{unread} unread / {total} total",
@@ -994,6 +1021,14 @@ const enMessages = {
       noMatching: "No sources match the current filter.",
       clearFilter: "Clear filter",
     },
+  },
+  photoLocations: {
+    title: "Photo locations",
+    summary: "{total} captured · {withGps} with GPS",
+    mapHint: 'Ask Claude "show these on a map" to plot them with the Google Map plugin.',
+    loading: "Loading…",
+    empty: "No photo locations captured yet. Send a geotagged photo via chat or a connected bridge to get started.",
+    noGps: "No GPS data",
   },
   pluginManageSkills: {
     deleteProjectSkill: "Delete this project-scope skill",

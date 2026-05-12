@@ -106,6 +106,7 @@ import { TOOL_NAMES } from "../config/toolNames";
 import type { ToolResultComplete } from "gui-chat-protocol/vue";
 import { View as TextResponseOriginalView } from "../plugins/textResponse/index";
 import { handleExternalLinkClick } from "../utils/dom/externalLink";
+import { clampIframeHeight } from "../utils/dom/iframeHeightClamp";
 import type { TextResponseData } from "../plugins/textResponse/types";
 import { formatSmartTime } from "../utils/format/date";
 import { isRecord } from "../utils/types";
@@ -202,8 +203,15 @@ function setNaturalWrapperRef(uuid: string, element: HTMLElement | null): void {
 }
 
 // Sandboxed iframes inside stack-natural plugins (e.g. presentHtml)
-// have no intrinsic content height, so CSS alone collapses them. Set
-// each iframe's height to match its document's scrollHeight on load.
+// have no intrinsic content height, so CSS alone collapses them. The
+// in-iframe reporter script (`iframeHeightReporterScript.ts`) posts
+// scrollHeight updates which `handleIframeHeightMessage` below applies
+// — that path's feedback-loop guard (slop heuristic + viewport cap +
+// `dataset.stackHeightPx`) is the canonical sizing channel.
+//
+// `sizeIframesIn` / `resizeOneIframe` are a fallback for the rare
+// non-sandboxed case (same-origin iframe whose document is reachable
+// from the parent) and reuse the same safeguards.
 function sizeIframesIn(wrapper: HTMLElement): void {
   const iframes = wrapper.querySelectorAll<HTMLIFrameElement>("iframe");
   for (const iframe of iframes) {
@@ -223,12 +231,12 @@ function sizeIframesIn(wrapper: HTMLElement): void {
   }
 }
 
-// Cap reported iframe heights so a malicious / buggy embedded script
-// can't request a multi-million-pixel iframe and tank the page. 30K is
-// well above any realistic single-document presentHtml content (a 4K
-// monitor's viewport height is ~2160px; a long Sankey or report fits
-// comfortably in a 5-10K range).
-const MAX_REPORTED_IFRAME_HEIGHT_PX = 30_000;
+// Iframe height clamp moved to a pure helper so the regression case
+// (#1268 — viewport-relative content climbing indefinitely through
+// the parent's height-setting feedback) can be unit-tested without
+// mounting Vue or a real iframe. See `iframeHeightClamp.ts` for both
+// caps (`MAX_REPORTED_IFRAME_HEIGHT_PX` absolute + `MAX_IFRAME_VH`
+// viewport-relative).
 
 // Cache `contentWindow → iframe` so message-driven sizing is O(1) per
 // message. Without this, every postMessage would force a full DOM walk
@@ -281,12 +289,13 @@ function handleIframeHeightMessage(event: MessageEvent): void {
   if (!data || typeof data !== "object") return;
   if ((data as { type?: unknown }).type !== "mc-iframe-height") return;
   const reported = (data as { height?: unknown }).height;
-  if (typeof reported !== "number" || !Number.isFinite(reported) || reported <= 0) return;
+  if (typeof reported !== "number") return;
   const { source } = event;
   if (!source || typeof source !== "object" || !("postMessage" in source)) return;
   const iframe = findIframeForSourceWindow(source as Window);
   if (!iframe) return;
-  const heightPx = Math.min(reported, MAX_REPORTED_IFRAME_HEIGHT_PX);
+  const heightPx = clampIframeHeight(reported, window.innerHeight);
+  if (heightPx <= 0) return;
   pendingIframeHeightsPx.set(iframe, heightPx);
   if (pendingHeightFlushRafId === null) {
     pendingHeightFlushRafId = requestAnimationFrame(flushPendingIframeHeights);
@@ -297,8 +306,10 @@ function resizeOneIframe(iframe: HTMLIFrameElement): void {
   try {
     const doc = iframe.contentDocument;
     if (!doc) return;
-    const height = Math.max(doc.documentElement?.scrollHeight ?? 0, doc.body?.scrollHeight ?? 0);
-    if (height > 0) iframe.style.height = `${height}px`;
+    const measured = Math.max(doc.documentElement?.scrollHeight ?? 0, doc.body?.scrollHeight ?? 0);
+    const heightPx = clampIframeHeight(measured, window.innerHeight);
+    if (heightPx <= 0) return;
+    iframe.style.height = `${heightPx}px`;
   } catch {
     // cross-origin sandbox — can't measure, leave default
   }

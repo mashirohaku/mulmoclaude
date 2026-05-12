@@ -11,9 +11,18 @@ function textEvent(overrides: Partial<LineEvent> = {}): LineEvent {
   };
 }
 
-describe("extractIncomingLineMessage", () => {
-  it("returns userId + text for a normal text message", () => {
-    assert.deepEqual(extractIncomingLineMessage(textEvent()), { userId: "U1234", text: "hello" });
+function imageEvent(overrides: Partial<LineEvent> = {}): LineEvent {
+  return {
+    type: "message",
+    message: { type: "image", id: "msg-img-9999" },
+    source: { userId: "U1234" },
+    ...overrides,
+  };
+}
+
+describe("extractIncomingLineMessage — text branch", () => {
+  it("returns kind:text + userId + text for a normal text message", () => {
+    assert.deepEqual(extractIncomingLineMessage(textEvent()), { kind: "text", userId: "U1234", text: "hello" });
   });
 
   it("returns null for non-message event types", () => {
@@ -22,9 +31,9 @@ describe("extractIncomingLineMessage", () => {
     assert.equal(extractIncomingLineMessage(textEvent({ type: "postback" })), null);
   });
 
-  it("returns null when message type is not 'text'", () => {
-    assert.equal(extractIncomingLineMessage(textEvent({ message: { type: "image" } })), null);
+  it("returns null when message type is unsupported (sticker / video)", () => {
     assert.equal(extractIncomingLineMessage(textEvent({ message: { type: "sticker" } })), null);
+    assert.equal(extractIncomingLineMessage(textEvent({ message: { type: "video", id: "v1" } })), null);
   });
 
   it("returns null when message is missing entirely", () => {
@@ -44,7 +53,32 @@ describe("extractIncomingLineMessage", () => {
 
   it("preserves text without trimming (sender's whitespace inside is intentional)", () => {
     const result = extractIncomingLineMessage(textEvent({ message: { type: "text", text: "  hello  world  " } }));
-    assert.equal(result?.text, "  hello  world  ");
+    assert.equal(result?.kind, "text");
+    if (result?.kind === "text") {
+      assert.equal(result.text, "  hello  world  ");
+    }
+  });
+});
+
+describe("extractIncomingLineMessage — image branch (#1222 PR-C)", () => {
+  it("returns kind:image + userId + imageMessageId for an image event", () => {
+    assert.deepEqual(extractIncomingLineMessage(imageEvent()), { kind: "image", userId: "U1234", imageMessageId: "msg-img-9999" });
+  });
+
+  it("returns null when image message id is missing", () => {
+    assert.equal(extractIncomingLineMessage(imageEvent({ message: { type: "image" } })), null);
+  });
+
+  it("returns null when image message id is empty", () => {
+    assert.equal(extractIncomingLineMessage(imageEvent({ message: { type: "image", id: "" } })), null);
+  });
+
+  it("returns null when image message id is non-string (defensive)", () => {
+    assert.equal(extractIncomingLineMessage(imageEvent({ message: { type: "image", id: 42 as unknown as string } })), null);
+  });
+
+  it("still requires source.userId for images", () => {
+    assert.equal(extractIncomingLineMessage(imageEvent({ source: undefined })), null);
   });
 });
 

@@ -1,8 +1,7 @@
 import { mkdirSync, statSync } from "fs";
 import path from "path";
 import { WORKSPACE_DIRS, workspacePath } from "../../workspace/paths.js";
-import { loadJsonFile } from "./json.js";
-import { writeFileAtomicSync } from "./atomic.js";
+import { loadJsonFile, writeJsonAtomicSync } from "./json.js";
 import { log } from "../../system/logger/index.js";
 
 const CONFIG_FILE_NAME = "reference-dirs.json";
@@ -25,7 +24,7 @@ export function readReferenceDirsJson(root?: string): unknown[] {
 export function writeReferenceDirsJson(entries: readonly unknown[], root?: string): void {
   const filePath = configPath(root ?? workspacePath);
   mkdirSync(path.dirname(filePath), { recursive: true });
-  writeFileAtomicSync(filePath, JSON.stringify(entries, null, 2));
+  writeJsonAtomicSync(filePath, entries);
 }
 
 export function isExistingDirectory(hostPath: string): boolean {

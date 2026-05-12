@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync } from "fs";
 import path from "path";
 import { workspacePath, WORKSPACE_DIRS } from "./paths.js";
 import { log } from "../system/logger/index.js";
-import { writeFileAtomicSync } from "../utils/files/atomic.js";
+import { writeJsonAtomicSync } from "../utils/files/json.js";
 import { isRecord } from "../utils/types.js";
 
 // ── Types ───────────────────────────────────────────────────────
@@ -133,7 +133,7 @@ export function saveCustomDirs(entries: readonly CustomDirEntry[], root?: string
   const base = root ?? workspacePath;
   const filePath = path.join(base, CONFIG_FILE);
   mkdirSync(path.dirname(filePath), { recursive: true });
-  writeFileAtomicSync(filePath, JSON.stringify(entries, null, 2));
+  writeJsonAtomicSync(filePath, entries);
   invalidateCache();
 }
 

@@ -297,18 +297,29 @@ interface PluginEntry {
 
 // Plugins the user can assign — exclude internal/auto-managed ones
 const EXCLUDED = new Set(["text-response"]);
-const guiPlugins: PluginEntry[] = pluginAllPluginNames()
-  .filter((name) => !EXCLUDED.has(name))
-  .map((name) => ({ name, enabled: true, requiredEnv: [] }));
+// `pluginAllPluginNames()` reads from the reactive `runtimeRegistry`
+// (src/tools/runtimeLoader.ts). Wrapping in `computed` makes this
+// re-evaluate when `loadRuntimePlugins` populates the registry
+// post-mount — runtime plugins (e.g. server-only `edgar`) only
+// become visible to the role editor through this reactive read.
+// Snapshotting once into a non-reactive const meant a setup() that
+// ran before the loader resolved would never see them.
+const guiPlugins = computed<PluginEntry[]>(() =>
+  pluginAllPluginNames()
+    .filter((name) => !EXCLUDED.has(name))
+    .map((name) => ({ name, enabled: true, requiredEnv: [] })),
+);
 
-const availablePlugins = ref<PluginEntry[]>(guiPlugins);
+const mcpTools = ref<PluginEntry[]>([]);
+
+const availablePlugins = computed<PluginEntry[]>(() => [...guiPlugins.value, ...mcpTools.value]);
 
 const mcpEndpoints = pluginEndpoints<{ list: string }>("mcpTools");
 
 onMounted(async () => {
   const result = await apiGet<PluginEntry[]>(mcpEndpoints.list);
   if (result.ok) {
-    availablePlugins.value = [...guiPlugins, ...result.data];
+    mcpTools.value = result.data;
   }
   // Non-critical: MCP tools enrich the plugin palette for role editing
   // but the view works fine with GUI plugins alone. No error banner needed.

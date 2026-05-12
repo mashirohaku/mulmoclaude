@@ -124,6 +124,7 @@ import {
 } from "./engine";
 import { applyCellHighlights, clearCellHighlights } from "./cellHighlights";
 import { getArrowKeyOffset, isWithinSheetBounds } from "./keyboardNav";
+import { handleExternalLinkClick } from "../../utils/dom/externalLink";
 import { errorMessage as formatErrorMessage } from "../../utils/errors";
 
 // Import all spreadsheet functions to populate the function registry
@@ -529,6 +530,9 @@ function saveMiniEditor() {
 }
 
 function handleTableClick(event: MouseEvent) {
+  // External http(s) links inside cells (XLSX hyperlink fields) —
+  // open in a new tab instead of navigating the SPA away (#1221).
+  if (handleExternalLinkClick(event)) return;
   const target = event.target as HTMLElement;
 
   // Check if clicked element is a table cell

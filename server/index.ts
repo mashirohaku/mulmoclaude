@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import agentRoutes, { startChat } from "./api/routes/agent.js";
 import accountingRoutes from "./api/routes/accounting.js";
+import photoLocationsRoutes from "./api/routes/photo-locations.js";
 import schedulerRoutes from "./api/routes/scheduler.js";
 import sessionsRoutes, { loadAllSessions } from "./api/routes/sessions.js";
 import chatIndexRoutes from "./api/routes/chat-index.js";
@@ -13,16 +14,19 @@ import pluginsRoutes from "./api/routes/plugins.js";
 import imageRoutes from "./api/routes/image.js";
 import attachmentRoutes from "./api/routes/attachment.js";
 import presentHtmlRoutes from "./api/routes/presentHtml.js";
+import presentSvgRoutes from "./api/routes/presentSvg.js";
 import chartRoutes from "./api/routes/chart.js";
 import rolesRoutes from "./api/routes/roles.js";
 import { DEFAULT_ROLE_ID } from "../src/config/roles.js";
 import mulmoScriptRoutes from "./api/routes/mulmo-script.js";
 import wikiRoutes from "./api/routes/wiki.js";
 import wikiHistoryRoutes from "./api/routes/wiki/history.js";
-import { provisionWikiHistoryHook } from "./workspace/wiki-history/provision.js";
+import { provisionDispatcherHook } from "./workspace/hooks/provision.js";
 import pdfRoutes from "./api/routes/pdf.js";
 import filesRoutes from "./api/routes/files.js";
 import configRoutes from "./api/routes/config.js";
+import configRefreshRoutes from "./api/routes/config-refresh.js";
+import hookLogRoutes from "./api/routes/hookLog.js";
 import skillsRoutes from "./api/routes/skills.js";
 import runtimePluginRoutes from "./api/routes/runtime-plugin.js";
 import { loadRuntimePlugins } from "./plugins/runtime-loader.js";
@@ -36,6 +40,8 @@ import { createNotificationsRouter } from "./api/routes/notifications.js";
 import { startLegacyAdapters } from "./notifier/legacy-adapters.js";
 import notifierRoutes from "./api/routes/notifier.js";
 import { initNotifier } from "./notifier/engine.js";
+import { registerSaveAttachmentHook } from "./utils/files/attachment-store.js";
+import { capturePhotoLocation } from "./workspace/photo-locations/index.js";
 import { createJournalRouter } from "./api/routes/journal.js";
 import { createTranslationRouter } from "./api/routes/translation.js";
 import { announcePluginMetaDiagnostics } from "./plugins/diagnostics.js";
@@ -53,6 +59,7 @@ import { mcpToolsRouter, mcpTools, isMcpToolEnabled } from "./agent/mcp-tools/in
 import { initWorkspace, workspacePath } from "./workspace/workspace.js";
 import { runMemoryMigrationOnce } from "./workspace/memory/run.js";
 import { runTopicMigrationOnce } from "./workspace/memory/topic-run.js";
+import { migrateCookingRecipesFromPlugin } from "./workspace/cooking-recipes/migrate.js";
 import { env, isGeminiAvailable } from "./system/env.js";
 import { buildSandboxStatus } from "./api/sandboxStatus.js";
 import { existsSync, readFileSync } from "fs";
@@ -76,6 +83,7 @@ import { bearerAuth } from "./api/auth/bearerAuth.js";
 import { deleteTokenFile, generateAndWriteToken, getCurrentToken } from "./api/auth/token.js";
 import { log } from "./system/logger/index.js";
 import { logBackgroundError } from "./utils/logBackgroundError.js";
+import { errorMessage } from "./utils/errors.js";
 import { registerScheduledSkills } from "./workspace/skills/scheduler.js";
 import { registerUserTasks } from "./workspace/skills/user-tasks.js";
 import { API_ROUTES } from "../src/config/apiRoutes.js";
@@ -127,7 +135,27 @@ runMemoryMigrationOnce(workspacePath)
   .then(() => runTopicMigrationOnce(workspacePath))
   .then(noop, noop);
 
+// Recipe-book plugin → `mc-cooking-coach` skill migration (#1286).
+// Boot-time idempotent copy from the plugin's `files.data` scope
+// (`data/plugins/<sanitised-pkg>/recipes/`) to the canonical
+// `data/cooking/recipes/` path the skill drives. Sentinel-gated so
+// every boot after the first is a no-op.
+migrateCookingRecipesFromPlugin().catch((err) => {
+  log.warn("cooking-recipes", "migration from plugin failed; falling back to original plugin path", {
+    error: errorMessage(err),
+  });
+});
+
 let sandboxEnabled = false;
+
+// --- Photo-EXIF capture hook (#1222 PR-A) ---
+// Registered at module load (NOT inside `startRuntimeServices`)
+// because uploads can land in the gap between `app.listen` accepting
+// connections and the runtime-services bootstrap finishing. The hook
+// itself short-circuits on non-image MIME / auto-capture opt-out, so
+// registering early is free for non-photo flows. (CodeRabbit review
+// on PR #1247.)
+registerSaveAttachmentHook(capturePhotoLocation);
 
 const app = express();
 
@@ -399,6 +427,81 @@ app.use(
   express.static(WORKSPACE_PATHS.htmls, { dotfiles: "deny", fallthrough: false }),
 );
 
+// Static mount for SVG artifacts. SVG files are loaded into the View
+// and Preview as `<img src="/artifacts/svg/<name>.svg">`. Browsers
+// refuse to execute `<script>` inside an SVG loaded via `<img>`, so
+// the `<img>` tag itself is the sandbox for that consumer path.
+//
+// BUT `/artifacts/svg/<file>.svg` is also a directly addressable URL on
+// the SPA's origin (loopback-only, bearer-auth bypassed for `<img src>`
+// access), so a user who navigates straight to that URL — or is tricked
+// into clicking a markdown link — would otherwise get the SVG rendered
+// as a TOP-LEVEL document with full script execution in the app's
+// origin (localStorage, /api/* with the user's session, etc.). Since
+// the SVG body is LLM-generated and writable via the update route, a
+// prompt-injected SVG becomes a stored-XSS vector.
+//
+// Mitigation: send a strict response CSP. The `sandbox` directive gives
+// the response an opaque origin and disables script execution for the
+// top-level navigation case; the other directives starve subresource
+// loads (block external script/font/connect, only allow `<image>` refs
+// to self / data URIs). CSP on a subresource response is mostly
+// informational — `<img>` rendering ignores the bytes' CSP — so this
+// header doesn't interfere with the normal View / Preview path.
+const SVG_RESPONSE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; sandbox";
+
+// Strict three-layer guard mirroring the `/artifacts/images` mount:
+// extension allowlist, realpath traversal check, dotfiles deny +
+// fallthrough false on `express.static`. Bearer auth bypassed for the
+// same reason as `/artifacts/images` / `/artifacts/html`: an
+// `<img src>` request can't carry an Authorization header. Loopback-
+// only listener + `requireSameOrigin` remain the trust boundary.
+const SVG_EXT_RE = /\.svg$/i;
+let svgsDirReal: string | null = null;
+async function getSvgsDirReal(): Promise<string | null> {
+  if (svgsDirReal) return svgsDirReal;
+  try {
+    svgsDirReal = await fsRealpath(WORKSPACE_PATHS.svgs);
+    return svgsDirReal;
+  } catch {
+    return null;
+  }
+}
+app.use(
+  "/artifacts/svg",
+  async (req, res, next) => {
+    if (!SVG_EXT_RE.test(req.path)) {
+      res.status(404).end();
+      return;
+    }
+    const root = await getSvgsDirReal();
+    if (!root) {
+      res.status(404).end();
+      return;
+    }
+    let relPath: string;
+    try {
+      relPath = decodeURIComponent(req.path.replace(/^\//, ""));
+    } catch {
+      res.status(404).end();
+      return;
+    }
+    if (!resolveWithinRoot(root, relPath)) {
+      res.status(404).end();
+      return;
+    }
+    if (containsDotfileSegment(relPath)) {
+      res.status(404).end();
+      return;
+    }
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+    res.setHeader("Content-Security-Policy", SVG_RESPONSE_CSP);
+    next();
+  },
+  express.static(WORKSPACE_PATHS.svgs, { dotfiles: "deny", fallthrough: false }),
+);
+
 app.get(API_ROUTES.health, (_req: Request, res: Response) => {
   // `os.loadavg()[0]` is the kernel 1-minute load average. On Linux /
   // macOS it's the primary "is this machine busy" signal; on Windows
@@ -437,6 +540,7 @@ app.get(API_ROUTES.sandbox, (_req: Request, res: Response) => {
 // the `/api` literal into each `router.post(API_ROUTES.…)` call.
 app.use(agentRoutes);
 app.use(accountingRoutes);
+app.use(photoLocationsRoutes);
 // todosRoutes removed (#1145) — todo is now a runtime plugin
 // (`@mulmoclaude/todo-plugin`); the dispatch route is generated by
 // `runtime-plugin.ts` at `/api/plugins/runtime/<pkg>/dispatch`.
@@ -449,6 +553,7 @@ app.use(pluginsRoutes);
 app.use(imageRoutes);
 app.use(attachmentRoutes);
 app.use(presentHtmlRoutes);
+app.use(presentSvgRoutes);
 app.use(chartRoutes);
 app.use(rolesRoutes);
 app.use(mulmoScriptRoutes);
@@ -460,6 +565,8 @@ app.use("/api/wiki", wikiHistoryRoutes);
 app.use(pdfRoutes);
 app.use(filesRoutes);
 app.use(configRoutes);
+app.use(configRefreshRoutes);
+app.use(hookLogRoutes);
 app.use(skillsRoutes);
 app.use(runtimePluginRoutes);
 async function listSessionsForBridge(opts: { limit: number; offset: number }) {
@@ -965,12 +1072,18 @@ process.on("SIGTERM", () => {
   sandboxEnabled = await setupSandbox();
   logMcpStatus();
 
-  // Provision the LLM-write hook in the workspace's
-  // `.claude/settings.json` (#763 PR 2). Idempotent — safe on every
-  // startup. Done BEFORE the agent ever spawns a claude CLI subprocess
-  // so the hook is in place from the first turn.
-  await provisionWikiHistoryHook().catch((err) => {
-    log.warn("wiki-history", "hook provisioning failed; LLM wiki edits will not be snapshotted this session", {
+  // Unified PostToolUse dispatcher (#763 PR 2, #1283, #1295). One
+  // entry in `<workspace>/.claude/settings.json` that fans out to:
+  //   - wiki-snapshot (page Writes → snapshot pipeline)
+  //   - config-refresh (SKILL.md / scheduler tasks.json / data/skills/*.md → POST /api/config/refresh)
+  //   - skill-bridge (data/skills/*.md ↔ .claude/skills/<slug>/SKILL.md)
+  //
+  // Done BEFORE the agent ever spawns a claude CLI subprocess so the
+  // hook is in place from the first turn. The provisioner also strips
+  // pre-unification entries (wikiHistory / configRefresh owner markers)
+  // so existing workspaces upgrade cleanly without double-firing.
+  await provisionDispatcherHook().catch((err) => {
+    log.warn("hooks", "dispatcher provisioning failed; PostToolUse side-effects (snapshots, refresh, skill bridge) will not run this session", {
       error: String(err),
     });
   });

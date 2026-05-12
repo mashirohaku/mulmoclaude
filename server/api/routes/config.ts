@@ -17,6 +17,7 @@ import { errorMessage } from "../../utils/errors.js";
 import { isRecord } from "../../utils/types.js";
 import { API_ROUTES } from "../../../src/config/apiRoutes.js";
 import { log } from "../../system/logger/index.js";
+import { asyncHandler } from "../../utils/asyncHandler.js";
 import { loadCustomDirs, saveCustomDirs, ensureCustomDirs, validateCustomDirs, type CustomDirEntry } from "../../workspace/custom-dirs.js";
 import { loadReferenceDirs, saveReferenceDirs, validateReferenceDirs, type ReferenceDirEntry } from "../../workspace/reference-dirs.js";
 
@@ -67,16 +68,18 @@ function parseMcpPayloadOrFail(res: ConfigRes, servers: McpServerEntry[]): McpCo
   }
 }
 
-// Run a filesystem save. On failure, respond 500 with the error's
-// message and return false so the caller can early-return. Returns
-// true on success.
+// Run a filesystem save. On failure, log the raw error server-side
+// (full triage detail kept in logs), respond 500 with the safe
+// `fallback` message, and return false so the caller can early-return.
+// Returns true on success. The raw `err.message` deliberately doesn't
+// reach the client — same threat model as `asyncHandler`.
 function runSaveOrFail(res: ConfigRes, save: () => void, fallback: string): boolean {
   try {
     save();
     return true;
   } catch (err) {
     log.error("config", `save failed: ${fallback}`, { error: errorMessage(err) });
-    serverError(res, errorMessage(err, fallback));
+    serverError(res, fallback);
     return false;
   }
 }
@@ -183,30 +186,29 @@ router.get(API_ROUTES.config.workspaceDirs, (_req: Request, res: Response<{ dirs
 
 router.put(
   API_ROUTES.config.workspaceDirs,
-  (req: Request<unknown, unknown, { dirs: unknown }>, res: Response<{ dirs: CustomDirEntry[] } | ConfigErrorResponse>) => {
-    const { body } = req;
-    log.info("config", "PUT workspace-dirs: start");
-    if (!isRecord(body) || !("dirs" in body)) {
-      log.warn("config", "PUT workspace-dirs: invalid envelope");
-      badRequest(res, "expected { dirs: [...] }");
-      return;
-    }
-    const result = validateCustomDirs(body.dirs);
-    if ("error" in result) {
-      log.warn("config", "PUT workspace-dirs: validation failed", { error: result.error });
-      badRequest(res, result.error);
-      return;
-    }
-    try {
+  asyncHandler<Request<unknown, unknown, { dirs: unknown }>, Response<{ dirs: CustomDirEntry[] } | ConfigErrorResponse>>(
+    "config",
+    "save failed",
+    async (req, res) => {
+      const { body } = req;
+      log.info("config", "PUT workspace-dirs: start");
+      if (!isRecord(body) || !("dirs" in body)) {
+        log.warn("config", "PUT workspace-dirs: invalid envelope");
+        badRequest(res, "expected { dirs: [...] }");
+        return;
+      }
+      const result = validateCustomDirs(body.dirs);
+      if ("error" in result) {
+        log.warn("config", "PUT workspace-dirs: validation failed", { error: result.error });
+        badRequest(res, result.error);
+        return;
+      }
       saveCustomDirs(result.entries);
       ensureCustomDirs(result.entries);
       log.info("config", "PUT workspace-dirs: ok", { dirs: result.entries.length });
       res.json({ dirs: result.entries });
-    } catch (err) {
-      log.error("config", "PUT workspace-dirs: threw", { error: errorMessage(err) });
-      serverError(res, errorMessage(err, "save failed"));
-    }
-  },
+    },
+  ),
 );
 
 // ── Reference directories (#455) ────────────────────────────────
@@ -217,29 +219,28 @@ router.get(API_ROUTES.config.referenceDirs, (_req: Request, res: Response<{ dirs
 
 router.put(
   API_ROUTES.config.referenceDirs,
-  (req: Request<unknown, unknown, { dirs: unknown }>, res: Response<{ dirs: ReferenceDirEntry[] } | ConfigErrorResponse>) => {
-    const { body } = req;
-    log.info("config", "PUT reference-dirs: start");
-    if (!isRecord(body) || !("dirs" in body)) {
-      log.warn("config", "PUT reference-dirs: invalid envelope");
-      badRequest(res, "expected { dirs: [...] }");
-      return;
-    }
-    const result = validateReferenceDirs(body.dirs);
-    if ("error" in result) {
-      log.warn("config", "PUT reference-dirs: validation failed", { error: result.error });
-      badRequest(res, result.error);
-      return;
-    }
-    try {
+  asyncHandler<Request<unknown, unknown, { dirs: unknown }>, Response<{ dirs: ReferenceDirEntry[] } | ConfigErrorResponse>>(
+    "config",
+    "save failed",
+    async (req, res) => {
+      const { body } = req;
+      log.info("config", "PUT reference-dirs: start");
+      if (!isRecord(body) || !("dirs" in body)) {
+        log.warn("config", "PUT reference-dirs: invalid envelope");
+        badRequest(res, "expected { dirs: [...] }");
+        return;
+      }
+      const result = validateReferenceDirs(body.dirs);
+      if ("error" in result) {
+        log.warn("config", "PUT reference-dirs: validation failed", { error: result.error });
+        badRequest(res, result.error);
+        return;
+      }
       saveReferenceDirs(result.entries);
       log.info("config", "PUT reference-dirs: ok", { dirs: result.entries.length });
       res.json({ dirs: result.entries });
-    } catch (err) {
-      log.error("config", "PUT reference-dirs: threw", { error: errorMessage(err) });
-      serverError(res, errorMessage(err, "save failed"));
-    }
-  },
+    },
+  ),
 );
 
 router.get(API_ROUTES.config.schedulerOverrides, (_req: Request, res: Response<{ overrides: ScheduleOverrides }>) => {
@@ -248,22 +249,24 @@ router.get(API_ROUTES.config.schedulerOverrides, (_req: Request, res: Response<{
 
 router.put(
   API_ROUTES.config.schedulerOverrides,
-  async (req: Request<unknown, unknown, { overrides: unknown }>, res: Response<{ overrides: ScheduleOverrides } | ConfigErrorResponse>) => {
-    const { body } = req;
-    log.info("config", "PUT scheduler-overrides: start");
-    if (!isRecord(body) || !("overrides" in body)) {
-      log.warn("config", "PUT scheduler-overrides: invalid envelope");
-      badRequest(res, "expected { overrides: { ... } }");
-      return;
-    }
-    const raw = body.overrides;
-    if (!isRecord(raw)) {
-      log.warn("config", "PUT scheduler-overrides: overrides not an object");
-      badRequest(res, "overrides must be an object");
-      return;
-    }
-    const overrides = raw as ScheduleOverrides;
-    try {
+  asyncHandler<Request<unknown, unknown, { overrides: unknown }>, Response<{ overrides: ScheduleOverrides } | ConfigErrorResponse>>(
+    "config",
+    "save failed",
+    async (req, res) => {
+      const { body } = req;
+      log.info("config", "PUT scheduler-overrides: start");
+      if (!isRecord(body) || !("overrides" in body)) {
+        log.warn("config", "PUT scheduler-overrides: invalid envelope");
+        badRequest(res, "expected { overrides: { ... } }");
+        return;
+      }
+      const raw = body.overrides;
+      if (!isRecord(raw)) {
+        log.warn("config", "PUT scheduler-overrides: overrides not an object");
+        badRequest(res, "overrides must be an object");
+        return;
+      }
+      const overrides = raw as ScheduleOverrides;
       saveSchedulerOverrides(overrides);
 
       // Apply to running task-manager immediately
@@ -283,11 +286,8 @@ router.put(
 
       log.info("config", "PUT scheduler-overrides: ok", { tasks: Object.keys(overrides).length });
       res.json({ overrides: loadSchedulerOverrides() });
-    } catch (err) {
-      log.error("config", "PUT scheduler-overrides: threw", { error: errorMessage(err) });
-      serverError(res, errorMessage(err, "save failed"));
-    }
-  },
+    },
+  ),
 );
 
 export default router;
