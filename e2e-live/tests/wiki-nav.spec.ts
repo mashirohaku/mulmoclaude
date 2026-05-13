@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { expect, test } from "@playwright/test";
+import { type Page, expect, test } from "@playwright/test";
 
 import { ONE_MINUTE_MS } from "../../server/utils/time.ts";
 import { navigateToWikiIndex, navigateToWikiPage, placeWikiPage, removeWikiPage, replaceWikiIndex, restoreWikiIndex } from "../fixtures/live-chat.ts";
@@ -8,10 +8,21 @@ import { navigateToWikiIndex, navigateToWikiPage, placeWikiPage, removeWikiPage,
 const L14_TIMEOUT_MS = ONE_MINUTE_MS;
 const L15_TIMEOUT_MS = ONE_MINUTE_MS;
 const L16_TIMEOUT_MS = ONE_MINUTE_MS;
-const L_WIKI_PIPE_TIMEOUT_MS = ONE_MINUTE_MS;
-const L_WIKI_LINT_PIPE_CLEAN_TIMEOUT_MS = ONE_MINUTE_MS;
-const L_WIKI_LINT_EMPTY_TARGET_TIMEOUT_MS = ONE_MINUTE_MS;
-const L_WIKI_LINT_BROKEN_TIMEOUT_MS = ONE_MINUTE_MS;
+// L-WIKI-* (the four #1297 regression scenarios below) all use the
+// shared `ONE_MINUTE_MS` budget directly via `test.setTimeout()`; we
+// don't introduce per-test wrappers because `ONE_MINUTE_MS` is
+// already the named constant they would alias to. L14/L15/L16 keep
+// their original per-test consts above for repo-history continuity
+// (intentionally not refactored in this PR).
+
+// Navigate to the wiki lint report and wait for the body-side h1 to
+// render. Body-scoped because the panel chrome also has its own
+// "Wiki Lint Report" h2 — a top-level `getByRole` would otherwise
+// hit strict-mode violation on two matching elements.
+const navigateToWikiLintReport = async (page: Page): Promise<void> => {
+  await page.goto("/wiki/lint-report");
+  await expect(page.getByTestId("wiki-page-body").getByRole("heading", { name: "Wiki Lint Report" })).toBeVisible();
+};
 
 // L-14 / L-15 each seed their own pair of wiki pages and never
 // touch the shared `data/wiki/index.md`, so they parallelise
@@ -225,7 +236,7 @@ test.describe("wiki navigation (real workspace)", () => {
   });
 
   test("L-WIKI-PIPE: [[slug|alias]] 形式のリンクをクリックすると URL に |alias が混入しない", async ({ page }, testInfo) => {
-    test.setTimeout(L_WIKI_PIPE_TIMEOUT_MS);
+    test.setTimeout(ONE_MINUTE_MS);
     // Covers PR #1312 / issue #1297: pre-fix `wikiSlugify` stripped
     // `|` as a non-ASCII character and concatenated the right-hand-
     // side alias's ASCII chars into the slug. Three symptoms all
@@ -292,7 +303,7 @@ test.describe("wiki navigation (real workspace)", () => {
   });
 
   test("L-WIKI-LINT-PIPE-CLEAN: lint レポート画面で [[slug|alias]] が broken link 扱いされない", async ({ page }, testInfo) => {
-    test.setTimeout(L_WIKI_LINT_PIPE_CLEAN_TIMEOUT_MS);
+    test.setTimeout(ONE_MINUTE_MS);
     // Covers PR #1312 / issue #1297 from the lint-UI side: pre-fix
     // `findBrokenLinksInPage` slugified the whole `<slug>|<alias>`
     // string and emitted false-positive broken-link entries on the
@@ -313,12 +324,7 @@ test.describe("wiki navigation (real workspace)", () => {
     try {
       await placeWikiPage(sourceSlug, [`# wiki-lint-clean source`, ``, `[[${targetSlug}|${displayAlias}]]`, ``].join("\n"));
       await placeWikiPage(targetSlug, [`# wiki-lint-clean target`, ``, `body marker ${nonce}`, ``].join("\n"));
-      await page.goto("/wiki/lint-report");
-      // Lint rendering uses marked → <ul><li>...</li></ul>; wait for
-      // the body-side h1 to hydrate. Scope inside `wiki-page-body`
-      // because the panel chrome also has its own "Wiki Lint Report"
-      // heading (an h2) — `getByRole` would otherwise match both.
-      await expect(page.getByTestId("wiki-page-body").getByRole("heading", { name: "Wiki Lint Report" })).toBeVisible();
+      await navigateToWikiLintReport(page);
       // Strict negative: no <li> in the lint output mentions our
       // source page with "not found" — that would be the pre-fix
       // false-positive shape. The `:has-text` filter scopes by both
@@ -342,7 +348,7 @@ test.describe("wiki navigation (real workspace)", () => {
   });
 
   test("L-WIKI-LINT-EMPTY-TARGET: lint レポート画面で bare [[Japanese]] が empty target 診断に出る", async ({ page }, testInfo) => {
-    test.setTimeout(L_WIKI_LINT_EMPTY_TARGET_TIMEOUT_MS);
+    test.setTimeout(ONE_MINUTE_MS);
     // Covers PR #1312's new "empty target" diagnostic. Pre-fix
     // bare `[[Japanese title]]` (or `[[#anchor]]`) collapsed via
     // `wikiSlugify` into an empty string and was reported as a
@@ -368,11 +374,7 @@ test.describe("wiki navigation (real workspace)", () => {
     const bareJapaneseTarget = "日本語のみのターゲット記号終端タイトル";
     try {
       await placeWikiPage(sourceSlug, [`# wiki-lint-empty source`, ``, `[[${bareJapaneseTarget}]]`, ``].join("\n"));
-      await page.goto("/wiki/lint-report");
-      // Scope to the body-side h1 — the panel chrome also has its
-      // own "Wiki Lint Report" h2 which would otherwise produce a
-      // strict-mode violation.
-      await expect(page.getByTestId("wiki-page-body").getByRole("heading", { name: "Wiki Lint Report" })).toBeVisible();
+      await navigateToWikiLintReport(page);
       // Positive: the seeded link must surface as an "empty target"
       // entry naming our source file and the bare Japanese token.
       // Pre-fix would have produced "→ <some-ascii-tail>.md not
@@ -394,7 +396,7 @@ test.describe("wiki navigation (real workspace)", () => {
   });
 
   test("L-WIKI-LINT-BROKEN: lint レポート画面で [[bogus-slug]] が broken link 診断に出る", async ({ page }, testInfo) => {
-    test.setTimeout(L_WIKI_LINT_BROKEN_TIMEOUT_MS);
+    test.setTimeout(ONE_MINUTE_MS);
     // General sanity: the broken-link diagnostic itself still works
     // post-fix. Distinct from L-WIKI-LINT-EMPTY-TARGET (Japanese
     // → empty slug) and L-WIKI-LINT-PIPE-CLEAN (alias must NOT
@@ -409,11 +411,7 @@ test.describe("wiki navigation (real workspace)", () => {
     const bogusTargetSlug = `e2e-live-wiki-lint-broken-bogus-${projectSlug}-${nonce}`;
     try {
       await placeWikiPage(sourceSlug, [`# wiki-lint-broken source`, ``, `[[${bogusTargetSlug}]]`, ``].join("\n"));
-      await page.goto("/wiki/lint-report");
-      // Scope to the body-side h1 — the panel chrome also has its
-      // own "Wiki Lint Report" h2 which would otherwise produce a
-      // strict-mode violation.
-      await expect(page.getByTestId("wiki-page-body").getByRole("heading", { name: "Wiki Lint Report" })).toBeVisible();
+      await navigateToWikiLintReport(page);
       // Positive: an entry naming both the source file and the bogus
       // target's `<slug>.md not found` form must appear. The
       // `bogusTargetSlug` substring also implicitly checks that the
