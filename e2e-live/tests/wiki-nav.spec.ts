@@ -9,6 +9,9 @@ const L14_TIMEOUT_MS = ONE_MINUTE_MS;
 const L15_TIMEOUT_MS = ONE_MINUTE_MS;
 const L16_TIMEOUT_MS = ONE_MINUTE_MS;
 const L_WIKI_PIPE_TIMEOUT_MS = ONE_MINUTE_MS;
+const L_WIKI_LINT_PIPE_CLEAN_TIMEOUT_MS = ONE_MINUTE_MS;
+const L_WIKI_LINT_EMPTY_TARGET_TIMEOUT_MS = ONE_MINUTE_MS;
+const L_WIKI_LINT_BROKEN_TIMEOUT_MS = ONE_MINUTE_MS;
 
 // L-14 / L-15 each seed their own pair of wiki pages and never
 // touch the shared `data/wiki/index.md`, so they parallelise
@@ -285,6 +288,143 @@ test.describe("wiki navigation (real workspace)", () => {
     } finally {
       await removeWikiPage(sourceSlug);
       await removeWikiPage(targetSlug);
+    }
+  });
+
+  test("L-WIKI-LINT-PIPE-CLEAN: lint レポート画面で [[slug|alias]] が broken link 扱いされない", async ({ page }, testInfo) => {
+    test.setTimeout(L_WIKI_LINT_PIPE_CLEAN_TIMEOUT_MS);
+    // Covers PR #1312 / issue #1297 from the lint-UI side: pre-fix
+    // `findBrokenLinksInPage` slugified the whole `<slug>|<alias>`
+    // string and emitted false-positive broken-link entries on the
+    // /wiki/lint-report page (`<slug>-<alias-ascii>.md not found`).
+    // Post-fix, the lint resolver shares `parseWikiLink` with the
+    // renderer so the alias suffix never reaches the slug.
+    //
+    // Same nonce strategy as L-14: each project gets unique slugs.
+    // The lint endpoint scans the entire workspace, so collision-
+    // safety comes from the per-test nonce — assertions only check
+    // for the seeded slug substring, never a fixed slug.
+    const projectSlug = testInfo.project.name;
+    const nonce = `${Date.now()}-${randomUUID().slice(0, 6)}`;
+    const sourceSlug = `e2e-live-wiki-lint-clean-source-${projectSlug}-${nonce}`;
+    const targetSlug = `e2e-live-wiki-lint-clean-target-${projectSlug}-${nonce}`;
+    const aliasAsciiToken = `lint-clean-alias-ascii-${nonce}`;
+    const displayAlias = `日本語の表示テキスト ${aliasAsciiToken}`;
+    try {
+      await placeWikiPage(sourceSlug, [`# wiki-lint-clean source`, ``, `[[${targetSlug}|${displayAlias}]]`, ``].join("\n"));
+      await placeWikiPage(targetSlug, [`# wiki-lint-clean target`, ``, `body marker ${nonce}`, ``].join("\n"));
+      await page.goto("/wiki/lint-report");
+      // Lint rendering uses marked → <ul><li>...</li></ul>; wait for
+      // the body-side h1 to hydrate. Scope inside `wiki-page-body`
+      // because the panel chrome also has its own "Wiki Lint Report"
+      // heading (an h2) — `getByRole` would otherwise match both.
+      await expect(page.getByTestId("wiki-page-body").getByRole("heading", { name: "Wiki Lint Report" })).toBeVisible();
+      // Strict negative: no <li> in the lint output mentions our
+      // source page with "not found" — that would be the pre-fix
+      // false-positive shape. The `:has-text` filter scopes by both
+      // tokens so the assertion fails only when our seeded link
+      // actually got flagged as broken (not on unrelated noise).
+      await expect(
+        page.locator(`li:has-text("${sourceSlug}"):has-text("not found")`),
+        "lint must not flag the seeded [[slug|alias]] link as broken (pre-fix false-positive sentinel)",
+      ).toHaveCount(0);
+      // Equally strict: the alias's ASCII token must never end up in
+      // a slug-form "not found" entry. Pre-fix produced
+      // `<slug>-<alias-ascii>.md not found`; post-fix it can't.
+      await expect(
+        page.locator(`li:has-text("${aliasAsciiToken}"):has-text("not found")`),
+        "alias ASCII token must not surface in any 'not found' lint entry",
+      ).toHaveCount(0);
+    } finally {
+      await removeWikiPage(sourceSlug);
+      await removeWikiPage(targetSlug);
+    }
+  });
+
+  test("L-WIKI-LINT-EMPTY-TARGET: lint レポート画面で bare [[Japanese]] が empty target 診断に出る", async ({ page }, testInfo) => {
+    test.setTimeout(L_WIKI_LINT_EMPTY_TARGET_TIMEOUT_MS);
+    // Covers PR #1312's new "empty target" diagnostic. Pre-fix
+    // bare `[[Japanese title]]` (or `[[#anchor]]`) collapsed via
+    // `wikiSlugify` into an empty string and was reported as a
+    // broken link to `<empty>.md`, indistinguishable from a real
+    // missing-file regression. Post-fix, the resolver detects the
+    // empty-slug case and emits `→ empty target` so operators can
+    // filter the noise apart from genuine `<slug>.md not found`.
+    //
+    // No target page is seeded — by design the link cannot resolve.
+    // Cleanup only touches the source page.
+    const projectSlug = testInfo.project.name;
+    const nonce = `${Date.now()}-${randomUUID().slice(0, 6)}`;
+    const sourceSlug = `e2e-live-wiki-lint-empty-source-${projectSlug}-${nonce}`;
+    // Bare Japanese-only target — wikiSlugify strips every char and
+    // returns "" so the resolver has no slug to look up. Crucially
+    // the target string contains NO ASCII (no nonce, no hyphen, no
+    // digit) — any surviving ASCII would slip through wikiSlugify
+    // and become a non-empty slug, demoting the diagnostic from
+    // "empty target" back to "<slug>.md not found". Per-test
+    // uniqueness comes from `sourceSlug` (which IS nonce-stamped),
+    // so the `<li>:has-text(sourceSlug)` filter still scopes the
+    // assertion to this run only.
+    const bareJapaneseTarget = "日本語のみのターゲット記号終端タイトル";
+    try {
+      await placeWikiPage(sourceSlug, [`# wiki-lint-empty source`, ``, `[[${bareJapaneseTarget}]]`, ``].join("\n"));
+      await page.goto("/wiki/lint-report");
+      // Scope to the body-side h1 — the panel chrome also has its
+      // own "Wiki Lint Report" h2 which would otherwise produce a
+      // strict-mode violation.
+      await expect(page.getByTestId("wiki-page-body").getByRole("heading", { name: "Wiki Lint Report" })).toBeVisible();
+      // Positive: the seeded link must surface as an "empty target"
+      // entry naming our source file and the bare Japanese token.
+      // Pre-fix would have produced "→ <some-ascii-tail>.md not
+      // found" instead of "→ empty target".
+      await expect(
+        page.locator(`li:has-text("${sourceSlug}"):has-text("${bareJapaneseTarget}"):has-text("empty target")`),
+        "lint must report bare Japanese-only [[…]] as empty target diagnostic",
+      ).toHaveCount(1);
+      // Negative: same source file, no "<slug>.md not found" entry
+      // for this link. If the diagnostic regressed back to broken-
+      // link reporting, this would catch it.
+      await expect(
+        page.locator(`li:has-text("${sourceSlug}"):has-text("${bareJapaneseTarget}"):has-text("not found")`),
+        "empty-target case must not also surface as a 'not found' broken link",
+      ).toHaveCount(0);
+    } finally {
+      await removeWikiPage(sourceSlug);
+    }
+  });
+
+  test("L-WIKI-LINT-BROKEN: lint レポート画面で [[bogus-slug]] が broken link 診断に出る", async ({ page }, testInfo) => {
+    test.setTimeout(L_WIKI_LINT_BROKEN_TIMEOUT_MS);
+    // General sanity: the broken-link diagnostic itself still works
+    // post-fix. Distinct from L-WIKI-LINT-EMPTY-TARGET (Japanese
+    // → empty slug) and L-WIKI-LINT-PIPE-CLEAN (alias must NOT
+    // false-positive). Here a plain ASCII slug references a file
+    // that doesn't exist — the canonical broken-link case the user
+    // would encounter when typoing or deleting a target page.
+    //
+    // No target page is seeded — by design the link cannot resolve.
+    const projectSlug = testInfo.project.name;
+    const nonce = `${Date.now()}-${randomUUID().slice(0, 6)}`;
+    const sourceSlug = `e2e-live-wiki-lint-broken-source-${projectSlug}-${nonce}`;
+    const bogusTargetSlug = `e2e-live-wiki-lint-broken-bogus-${projectSlug}-${nonce}`;
+    try {
+      await placeWikiPage(sourceSlug, [`# wiki-lint-broken source`, ``, `[[${bogusTargetSlug}]]`, ``].join("\n"));
+      await page.goto("/wiki/lint-report");
+      // Scope to the body-side h1 — the panel chrome also has its
+      // own "Wiki Lint Report" h2 which would otherwise produce a
+      // strict-mode violation.
+      await expect(page.getByTestId("wiki-page-body").getByRole("heading", { name: "Wiki Lint Report" })).toBeVisible();
+      // Positive: an entry naming both the source file and the bogus
+      // target's `<slug>.md not found` form must appear. The
+      // `bogusTargetSlug` substring also implicitly checks that the
+      // resolver did NOT slugify it down to an empty string — it
+      // is plain ASCII and must survive verbatim.
+      await expect(
+        page.locator(`li:has-text("${sourceSlug}"):has-text("${bogusTargetSlug}.md not found")`),
+        "lint must report [[bogus-slug]] as broken link with '<slug>.md not found' shape",
+      ).toHaveCount(1);
+    } finally {
+      await removeWikiPage(sourceSlug);
     }
   });
 });
