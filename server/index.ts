@@ -210,7 +210,16 @@ app.use("/api", (req, res, next) => {
     next();
     return;
   }
-  if (req.method === "GET" && RUNTIME_PLUGIN_ASSET_PATH_RE.test(req.path)) {
+  if ((req.method === "GET" || req.method === "HEAD") && RUNTIME_PLUGIN_ASSET_PATH_RE.test(req.path)) {
+    // HEAD is bypassed for the same reason as GET: the frontend
+    // runtime-plugin loader HEAD-probes `dist/vue.js` to distinguish
+    // "no Vue bundle (404, server-only plugin)" from real load
+    // failures before `import()`-ing the asset (#1273 follow-up).
+    // That probe is a raw `fetch`, not the bearer-attaching `apiGet`,
+    // and the actual `import()` itself can't attach Authorization
+    // either — so the auth-bypass must cover both verbs or every
+    // runtime plugin's Vue View silently downgrades to a
+    // definition-only entry (401 → "unexpected status" → no view).
     next();
     return;
   }
