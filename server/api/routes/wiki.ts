@@ -52,6 +52,15 @@ export { findBrokenLinksInPage, findMissingFiles, findOrphanPages, findTagDrift,
 // renderer fix). `parseWikiLink` strips the display half so the
 // lookup uses just the target — same parser the renderer + lint
 // agree on, which is the whole point of the #1297 refactor.
+// Below this length the fuzzy `includes` step skips altogether.
+// CJK / emoji-only / very-short page names get slugified down to a
+// short noise tail (e.g. "日本語タイトル-chromium-{nonce}" →
+// "-chromium-{nonce}"), and that noise will partial-match almost
+// any page that happens to share the suffix. Skipping fuzzy for
+// these slugs avoids silent miss-resolves; the index.md title-match
+// fallback below still handles the legitimate non-ASCII case (#1194).
+const MIN_FUZZY_SLUG_LEN = 6;
+
 async function resolvePagePath(pageName: string): Promise<string | null> {
   const dir = pagesDir();
   const { slugs } = await getPageIndex(dir);
@@ -64,13 +73,8 @@ async function resolvePagePath(pageName: string): Promise<string | null> {
     const exact = slugs.get(slug);
     if (exact) return path.join(dir, exact);
 
-    // Fuzzy: same `includes` semantics as the old sync path — iterate
-    // the index's keys, no filesystem access.
-    for (const [key, file] of slugs) {
-      if (slug.includes(key) || key.includes(slug)) {
-        return path.join(dir, file);
-      }
-    }
+    const fuzzy = pickFuzzyMatch(slug, slugs);
+    if (fuzzy) return path.join(dir, fuzzy);
   }
 
   // Non-ASCII page names (e.g. Japanese [[wiki links]]) produce empty
@@ -85,6 +89,39 @@ async function resolvePagePath(pageName: string): Promise<string | null> {
   }
 
   return null;
+}
+
+// Walk every indexed slug looking for an `includes`-style match.
+// Returns the single best candidate, or null when the slug is too
+// short to be meaningful OR multiple candidates tie at the top score
+// (ambiguous — leave the resolution to the caller's title-match
+// fallback rather than silently picking iteration-order-first).
+//
+// Score = min(slug.length, key.length) / max(slug.length, key.length).
+// A perfect match where both strings are identical scores 1.0 (but
+// that path is taken by the exact `slugs.get` above, never reaches
+// here). Otherwise the highest-scoring partial match wins, and the
+// score is decoupled from Map iteration order (= filesystem readdir
+// order) so the resolver is deterministic across hosts.
+export function pickFuzzyMatch(slug: string, slugs: ReadonlyMap<string, string>): string | null {
+  if (slug.length < MIN_FUZZY_SLUG_LEN) return null;
+  let bestFile: string | null = null;
+  let bestScore = 0;
+  let bestIsTied = false;
+  for (const [key, file] of slugs) {
+    if (!slug.includes(key) && !key.includes(slug)) continue;
+    const shorter = Math.min(slug.length, key.length);
+    const longer = Math.max(slug.length, key.length);
+    const score = shorter / longer;
+    if (score > bestScore) {
+      bestScore = score;
+      bestFile = file;
+      bestIsTied = false;
+    } else if (score === bestScore) {
+      bestIsTied = true;
+    }
+  }
+  return bestIsTied ? null : bestFile;
 }
 
 router.get(API_ROUTES.wiki.base, async (req: Request, res: Response<WikiResponse | ErrorResponse>) => {

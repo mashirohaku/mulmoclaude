@@ -80,6 +80,7 @@ Code structure, APIs, and build instructions for the host itself. Plugin authors
 | [Task Manager](task-manager.md)               | English  | Server tick loop + @receptron/task-scheduler integration                                                                            |
 | [Logging](logging.md)                         | English  | Log levels, formats, rotation                                                                                                       |
 | [Sandbox Credentials](sandbox-credentials.md) | English  | Docker sandbox credential forwarding                                                                                                |
+| [MCP servers and the Docker sandbox](mcp-sandbox.md) | English  | Why stdio MCP servers can't run under the sandbox, why HTTP MCPs do, and what MulmoClaude drops from the per-session MCP config (#1334) |
 | [Manual Testing](manual-testing.md)           | English  | Manual test items not covered by E2E                                                                                                |
 
 ## Project

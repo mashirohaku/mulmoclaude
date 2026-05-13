@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import type { Request, Response, Router } from "express";
 import hookLogRoutes from "../../../server/api/routes/hookLog.js";
 import { log } from "../../../server/system/logger/index.js";
+import { API_ROUTES } from "../../../src/config/apiRoutes.js";
 
 interface LogCall {
   level: "info" | "warn" | "error";
@@ -34,11 +35,11 @@ interface RouterInternals {
 function getPostHandler(router: Router): (req: Request, res: Response) => void {
   const internals = router as unknown as RouterInternals;
   for (const layer of internals.stack) {
-    if (layer.route && layer.route.path === "/api/hooks/log") {
+    if (layer.route && layer.route.path === API_ROUTES.hooks.log) {
       return layer.route.stack[0].handle;
     }
   }
-  throw new Error("POST /api/hooks/log handler not found in router stack");
+  throw new Error(`POST ${API_ROUTES.hooks.log} handler not found in router stack`);
 }
 
 interface MockResponse {

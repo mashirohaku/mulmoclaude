@@ -24,7 +24,8 @@
     "@mulmobridge/client": "^0.1.4",
     "@mulmobridge/protocol": "^0.1.4",
     "dotenv": "^17.0.0",
-    "express": "^5.0.0"
+    "express": "^5.0.0",
+    "express-rate-limit": "^8.5.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",

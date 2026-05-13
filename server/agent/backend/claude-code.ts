@@ -143,6 +143,7 @@ async function* runClaudeAgent(input: AgentInput): AsyncGenerator<AgentEvent> {
     claudeSessionId: input.sessionToken,
     mcpConfigPath: input.mcpConfigPath,
     extraAllowedTools: input.extraAllowedTools,
+    effortLevel: input.effortLevel,
   });
 
   const proc = spawnClaude(input.useDocker, input.workspacePath, cliArgs, input.sessionId);

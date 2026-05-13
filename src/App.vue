@@ -88,7 +88,12 @@
         v-if="!isStackLayout && !sidePanelExpanded"
         class="w-80 flex-shrink-0 border-r border-gray-200 flex flex-col bg-white text-gray-900 relative"
         data-testid="chat-sidebar"
+        @dragenter="onPanelDragenter"
+        @dragover="onPanelDragover"
+        @dragleave="onPanelDragleave"
+        @drop="onPanelDrop"
       >
+        <FileDropOverlay v-if="isPanelDragging" />
         <!-- Tool result previews + role header (#842) -->
         <SessionSidebar
           ref="sessionSidebarRef"
@@ -130,8 +135,14 @@
         />
       </div>
 
-      <!-- Canvas column -->
-      <div v-if="!sidePanelExpanded" class="flex-1 flex flex-col bg-white text-gray-900 min-w-0 overflow-hidden relative">
+      <!-- Canvas column. In stack-chat mode the canvas IS the chat
+           panel (messages on top, ChatInput at the bottom), so the
+           panel-wide drop zone (#1289 Step 2) applies here too. In
+           single mode the canvas hosts plugin pages (Files / Wiki /
+           …); we deliberately do NOT widen the drop zone onto those
+           because each page handles file input on its own terms. -->
+      <div v-if="!sidePanelExpanded" class="flex-1 flex flex-col bg-white text-gray-900 min-w-0 overflow-hidden relative" v-on="canvasDropHandlers">
+        <FileDropOverlay v-if="isPanelDragging && isStackLayout && isChatPage" />
         <div ref="canvasRef" class="flex-1 overflow-hidden outline-none min-h-0" tabindex="0" @mousedown="activePane = 'main'" @keydown="handleCanvasKeydown">
           <!-- Chat page: single or stack layout -->
           <template v-if="isChatPage && layoutMode === 'single'">
@@ -273,6 +284,7 @@ import SidebarHeader from "./components/SidebarHeader.vue";
 import SessionHeaderControls from "./components/SessionHeaderControls.vue";
 import SessionTabBar from "./components/SessionTabBar.vue";
 import ChatInput, { type PastedFile } from "./components/ChatInput.vue";
+import FileDropOverlay from "./components/FileDropOverlay.vue";
 import SessionHistoryExpandButton from "./components/SessionHistoryExpandButton.vue";
 import SessionHistoryPanel from "./components/SessionHistoryPanel.vue";
 import SessionSidebar from "./components/SessionSidebar.vue";
@@ -307,6 +319,7 @@ import { useRunElapsed } from "./composables/useRunElapsed";
 import { useKeyNavigation } from "./composables/useKeyNavigation";
 import { useDebugBeat } from "./composables/useDebugBeat";
 import { useChatScroll } from "./composables/useChatScroll";
+import { useFileDropZone } from "./composables/useFileDropZone";
 import { useViewLayout } from "./composables/useViewLayout";
 import { useSessionSync } from "./composables/useSessionSync";
 import { useSessionDerived } from "./composables/useSessionDerived";
@@ -495,12 +508,31 @@ useGlobalImageErrorRepair();
 
 const sessionSidebarRef = ref<{ root: HTMLDivElement | null } | null>(null);
 const canvasRef = ref<HTMLDivElement | null>(null);
-const chatInputRef = ref<{ focus: () => void; collapseSuggestions: () => void } | null>(null);
+const chatInputRef = ref<{ focus: () => void; collapseSuggestions: () => void; readFile: (file: File) => void } | null>(null);
 const { focusChatInput } = useChatScroll({
   sessionSidebarRef,
   toolResults,
   isRunning: activeSessionRunning,
   chatInputRef,
+});
+
+// Panel-wide file drop (#1289 Step 2). The handlers are bound on
+// both the sidebar (single layout) and the stack-mode canvas column;
+// the same `chatInputRef` is reused across layouts because only one
+// ChatInput is mounted at a time (v-if'd). The composable also
+// installs a window-level guard so a drop OUTSIDE the panel still
+// `preventDefault`s — the browser would otherwise navigate to the
+// file and the user would lose their in-progress conversation.
+const {
+  isDragging: isPanelDragging,
+  onDragenter: onPanelDragenter,
+  onDragover: onPanelDragover,
+  onDragleave: onPanelDragleave,
+  onDrop: onPanelDrop,
+} = useFileDropZone({
+  onFile: (file) => {
+    chatInputRef.value?.readFile(file);
+  },
 });
 
 const { showRightSidebar, toggleRightSidebar } = useRightSidebar();
@@ -558,6 +590,22 @@ const { isStackLayout } = useViewLayout({
   isChatPage,
   activePane,
 });
+
+// Canvas-column drop handlers are conditional: only attach in
+// stack-chat mode. Single-mode canvas shows plugin pages (Files /
+// Wiki / …) whose own drop handling we don't want to shadow.
+// v-on with an empty object is a no-op in Vue 3, so the canvas
+// listens to nothing on single-mode chat / non-chat pages.
+const canvasDropHandlers = computed(() =>
+  isStackLayout.value && isChatPage.value
+    ? {
+        dragenter: onPanelDragenter,
+        dragover: onPanelDragover,
+        dragleave: onPanelDragleave,
+        drop: onPanelDrop,
+      }
+    : {},
+);
 
 // Clear currentSessionId when the user leaves /chat so downstream
 // consumers (history-panel border, mark-read, unread dot, session-

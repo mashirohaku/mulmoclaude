@@ -33,7 +33,7 @@
 //        a bulk `rm -rf data/skills/` or wildcards are intentionally
 //        NOT mirrored to avoid mass deletion surprises)
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { buildAuthPost, safePost, serverLog } from "../shared/sidecar.js";
 import type { HookPayload } from "../shared/stdin.js";
@@ -127,10 +127,22 @@ export function slugFromRmCommand(command: string): string | null {
   return SLUG_RE.test(slug) ? slug : null;
 }
 
+// Atomic mirror: write to a tmp file in the destination dir, then
+// rename onto the canonical path. `fs.renameSync` is atomic on POSIX
+// when source + destination share a filesystem (always true here —
+// both are inside `.claude/skills/<slug>/`). If the hook is killed
+// mid-write, the half-written tmp file is left behind (harmless,
+// never read) and SKILL.md still has its previous contents — Claude
+// CLI's skill discovery never sees a torn file. CodeRabbit review
+// on PR #1298.
 function mirrorWrite(slug: string): void {
   const content = readFileSync(dataSkillFilePath(slug), "utf-8");
-  mkdirSync(claudeSkillDir(slug), { recursive: true });
-  writeFileSync(claudeSkillFilePath(slug), content, "utf-8");
+  const destDir = claudeSkillDir(slug);
+  mkdirSync(destDir, { recursive: true });
+  const dest = claudeSkillFilePath(slug);
+  const tmp = path.join(destDir, `.SKILL.md.${process.pid}.tmp`);
+  writeFileSync(tmp, content, "utf-8");
+  renameSync(tmp, dest);
 }
 
 function mirrorDelete(slug: string): void {

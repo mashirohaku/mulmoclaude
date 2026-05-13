@@ -34,6 +34,7 @@ const deMessages = {
     fileTooLarge: "Datei zu groß ({sizeMB} MB). Das Maximum beträgt 30 MB.",
     unsupportedFileType: "Dateityp nicht unterstützt. Akzeptiert: Bilder, PDF, DOCX, XLSX, PPTX, Textdateien.",
     attachImageFailed: "Anhängen des Bildes fehlgeschlagen: {error}",
+    dropHint: "Datei zum Anhängen ablegen",
   },
   sessionHistoryPanel: {
     filters: {
@@ -148,7 +149,15 @@ const deMessages = {
       refs: "Referenzverzeichnisse",
       map: "Karte",
       photos: "Fotos",
+      model: "Modell",
     },
+    groups: {
+      llm: "LLM",
+      servers: "Server",
+      workspace: "Arbeitsbereich",
+      plugins: "Plugins",
+    },
+    navAriaLabel: "Einstellungsbereiche",
     mapTab: {
       description:
         "Legt den Google-Maps-API-Schlüssel fest, den das Karten-Plugin verwendet. Der Schlüssel wird lokal gespeichert und nur an Google Maps gesendet.",
@@ -170,6 +179,16 @@ const deMessages = {
         "Aktiv: Für jedes hochgeladene Bild mit EXIF-GPS wird ein Standort-Sidecar in data/locations/ erzeugt. Aus: Es wird nichts automatisch erfasst; das LLM kann EXIF weiterhin auf Anforderung lesen.",
       statusOn: "Automatische Erfassung AN",
       statusOff: "Automatische Erfassung AUS",
+      loadError: "Einstellungen konnten nicht geladen werden",
+      saveError: "Speichern fehlgeschlagen",
+    },
+    modelTab: {
+      description: "Steuert den Reasoning-Effort, den Claude Code pro Zug verwendet. Ohne Einstellung wird der Standard von Claude verwendet.",
+      effortLabel: "Reasoning-Effort",
+      effortUnset: "(nicht gesetzt — Standard von Claude verwenden)",
+      helperText: "Höhere Stufen erlauben mehr Denkzeit, erhöhen aber Latenz und Token-Verbrauch.",
+      configured: "Effort: {level}",
+      notConfigured: "Nicht gesetzt",
       loadError: "Einstellungen konnten nicht geladen werden",
       saveError: "Speichern fehlgeschlagen",
     },
@@ -376,7 +395,8 @@ const deMessages = {
     enabled: "aktiviert",
     urlLabel: "URL:",
     commandLabel: "Befehl:",
-    dockerNonWorkspaceWarning: "⚠ Enthält Pfade außerhalb des Workspaces — diese werden in Docker nicht aufgelöst.",
+    dockerStdioUnsupported: "⚠ Wird nicht ausgeführt, solange die Docker-Sandbox aktiv ist.",
+    learnMore: "Mehr erfahren",
     addServerButton: "+ MCP-Server hinzufügen",
     nameLabel: "Name",
     namePlaceholder: "mein-server",

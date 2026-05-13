@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import type { Role } from "../../src/config/roles.js";
 import { mcpTools, isMcpToolEnabled } from "./mcp-tools/index.js";
 import { getActiveToolDescriptors } from "./activeTools.js";
-import type { McpServerSpec } from "../system/config.js";
+import type { EffortLevel, McpServerSpec } from "../system/config.js";
 import { getCurrentToken } from "../api/auth/token.js";
 import type { Attachment } from "@mulmobridge/protocol";
 import { isImageMime, isNativeAttachmentMime } from "@mulmobridge/client";
@@ -79,6 +79,22 @@ export function prepareUserServers(userServers: Record<string, McpServerSpec>, u
     if (spec.type === "http") {
       out[serverId] = prepareUserHttpServer(spec, useDocker);
     } else {
+      // Stay symmetric with `userServerAllowedToolNames`: stdio
+      // servers can't run inside the sandbox image (see
+      // docs/mcp-sandbox.md for the full rationale — #162 / #1334).
+      // Claude CLI 2.1.x silently exits 1 when a stdio MCP fails to
+      // start, so passing the spec through here would mask the
+      // failure as a generic boot error. Drop + log per skipped
+      // entry so an operator scanning the log knows why their MCP
+      // didn't load.
+      if (useDocker) {
+        log.info("mcp", "skipping stdio server in Docker sandbox", {
+          serverId,
+          transport: "stdio",
+          reason: "sandbox image is too minimal to host arbitrary stdio MCP runtimes",
+        });
+        continue;
+      }
       out[serverId] = prepareUserStdioServer(spec, useDocker, hostWorkspacePath);
     }
   }
@@ -211,10 +227,13 @@ export interface CliArgsParams {
   // Web UI-managed extension of the allowed-tools list. Merged with
   // BASE_ALLOWED_TOOLS and the mcp__mulmoclaude__ plugin names.
   extraAllowedTools?: string[];
+  // Reasoning effort (#1323). When undefined, the flag is omitted
+  // and Claude picks its own default.
+  effortLevel?: EffortLevel;
 }
 
 export function buildCliArgs(params: CliArgsParams): string[] {
-  const { systemPrompt, activePlugins, claudeSessionId, mcpConfigPath, extraAllowedTools = [] } = params;
+  const { systemPrompt, activePlugins, claudeSessionId, mcpConfigPath, extraAllowedTools = [], effortLevel } = params;
 
   const mcpToolNames = activePlugins.map((pluginName) => `mcp__mulmoclaude__${pluginName}`);
   // DEBUG: also pass the wildcard form `mcp__mulmoclaude` so Claude
@@ -262,6 +281,10 @@ export function buildCliArgs(params: CliArgsParams): string[] {
     // intends, since mulmoclaude itself is the broker for all the
     // GUI plugin tools.
     args.push("--strict-mcp-config");
+  }
+
+  if (effortLevel) {
+    args.push("--effort", effortLevel);
   }
 
   return args;

@@ -64,6 +64,46 @@ describe("isAppSettings", () => {
     assert.equal(mod.isAppSettings({ extraAllowedTools: ["ok", 42] }), false);
     assert.equal(mod.isAppSettings({ extraAllowedTools: [null] }), false);
   });
+
+  it("accepts known effortLevel values", () => {
+    for (const level of mod.EFFORT_LEVELS) {
+      assert.ok(mod.isAppSettings({ extraAllowedTools: [], effortLevel: level }), `expected ${level} to be accepted`);
+    }
+  });
+
+  it("rejects unknown effortLevel values", () => {
+    assert.equal(mod.isAppSettings({ extraAllowedTools: [], effortLevel: "ultra" }), false);
+    assert.equal(mod.isAppSettings({ extraAllowedTools: [], effortLevel: "" }), false);
+    assert.equal(mod.isAppSettings({ extraAllowedTools: [], effortLevel: 42 }), false);
+    assert.equal(mod.isAppSettings({ extraAllowedTools: [], effortLevel: null }), false);
+  });
+});
+
+describe("isAppSettingsPatch", () => {
+  it("allows null effortLevel as the clear-me sentinel", () => {
+    assert.ok(mod.isAppSettingsPatch({ effortLevel: null }));
+    assert.ok(mod.isAppSettingsPatch({ effortLevel: "high" }));
+    assert.ok(mod.isAppSettingsPatch({}));
+  });
+
+  it("rejects garbage effortLevel even on the patch path", () => {
+    assert.equal(mod.isAppSettingsPatch({ effortLevel: "ultra" }), false);
+    assert.equal(mod.isAppSettingsPatch({ effortLevel: 42 }), false);
+  });
+});
+
+describe("normaliseAppSettingsPatch", () => {
+  it("strips null effortLevel", () => {
+    assert.deepEqual(mod.normaliseAppSettingsPatch({ effortLevel: null }), {});
+  });
+
+  it("preserves a present effortLevel", () => {
+    assert.deepEqual(mod.normaliseAppSettingsPatch({ effortLevel: "high" }), { effortLevel: "high" });
+  });
+
+  it("preserves other fields untouched", () => {
+    assert.deepEqual(mod.normaliseAppSettingsPatch({ extraAllowedTools: ["a"], effortLevel: null }), { extraAllowedTools: ["a"] });
+  });
 });
 
 describe("loadSettings", () => {
